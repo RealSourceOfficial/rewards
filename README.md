@@ -116,6 +116,11 @@ Screenshots and screen recorder > Screenshot format to **PNG**. JPEG ringing aro
 text is exactly what breaks OCR, and these apps are full of thin light-grey text. Prefer several
 normal full-resolution screenshots over one long scroll capture.
 
+**Check it against the picture.** Each scanned image shows a thumbnail in the review list. Tap it
+for a full-screen viewer: drag to pan, pinch or use the buttons to zoom, double-tap to fit the
+width. Useful because upload and sharing often strip the original filename, so the name alone
+won't tell you which screen you're looking at.
+
 **Paste text is the accurate path.** Android's built-in OCR is ML Kit and is markedly better than
 tesseract on app UI. Open a screenshot, long-press the text, Select all, Copy, then paste into the
 box on the scan screen. Separate multiple screens with a blank line.

@@ -88,6 +88,15 @@ a{color:inherit}
 .close{font-size:1.5rem;line-height:1;color:var(--ink60);padding:0 .25rem}
 .place-chip{margin-top:.75rem;padding:.75rem;background:var(--paper);border-radius:var(--r);font-size:.875rem}
 .place-chip a{display:inline-block;margin-top:.25rem;color:var(--ink60)}
+.shot-thumb{display:block;width:100%;max-height:200px;object-fit:cover;object-position:top center;border-radius:var(--r);border:1px solid var(--rule);background:var(--paper)}
+.shot-wrap{position:relative;margin-top:.5rem}
+.shot-tag{position:absolute;right:.5rem;bottom:.5rem;background:rgba(27,36,48,.82);color:var(--paper);font-size:.75rem;padding:.25rem .6rem;border-radius:999px}
+.viewer{position:fixed;inset:0;z-index:80;background:#0b0f14;display:flex;flex-direction:column}
+.viewer-stage{flex:1;position:relative;overflow:hidden;touch-action:none}
+.viewer-stage img{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform;-webkit-user-drag:none;user-select:none}
+.viewer-bar{display:flex;gap:.5rem;padding:.6rem .75rem calc(.6rem + env(safe-area-inset-bottom));background:#11161d}
+.viewer-bar button{flex:1;padding:.65rem;border-radius:var(--r);border:1px solid #2a323d;color:#e9ecf1;font-weight:600;font-size:.95rem}
+.viewer-hint{color:#8d97a4;font-size:.75rem;text-align:center;padding:.35rem .75rem 0}
 .toast{position:fixed;left:50%;bottom:calc(1.25rem + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:.5rem 1rem;border-radius:999px;font-size:.875rem;box-shadow:0 4px 12px rgba(27,36,48,.25);z-index:60}
 .error{margin-top:.75rem;font-size:.875rem;color:var(--loss)}
 .warn{margin-top:.75rem;padding:.75rem;border-radius:var(--r);background:#FBEFEA;color:#7A2A1E;font-size:.8125rem;line-height:1.5}
@@ -98,6 +107,7 @@ a{color:inherit}
 <body>
 <div id="app"></div>
 <div id="sheet"></div>
+<div id="viewer"></div>
 <div id="toast"></div>
 
 <script>
@@ -875,11 +885,181 @@ function ocrImage(file, onProgress){
   });
 }
 
+/* ============================ image viewer ============================
+   Full-screen pan/zoom for checking a scanned screenshot against what the
+   parser read. Transform-based rather than native page zoom, so the sheet
+   underneath doesn't move and the gesture stays inside the overlay. */
+
+function openViewer(ri){
+  if (!ui.shots[ri]) return;
+  ui.viewer = {ri: ri, k: 1, x: 0, y: 0, nw: 0, nh: 0, fit: 1};
+  renderViewer();
+}
+
+function closeViewer(){
+  ui.viewer = null;
+  renderViewer();
+}
+
+function renderViewer(){
+  var host = document.getElementById("viewer");
+  if (!host) return;
+  if (!ui.viewer){ host.innerHTML = ""; return; }
+
+  host.innerHTML =
+    '<div class="viewer" role="dialog" aria-modal="true" aria-label="Screenshot preview">'
+    + '<div class="viewer-stage" id="vstage">'
+    + '<img id="vimg" src="' + esc(ui.shots[ui.viewer.ri]) + '" alt="Screenshot">'
+    + '</div>'
+    + '<p class="viewer-hint">Drag to move, pinch or use the buttons to zoom. '
+    + 'Double-tap to fit.</p>'
+    + '<div class="viewer-bar">'
+    + '<button data-act="v-out" aria-label="Zoom out">&minus;</button>'
+    + '<button data-act="v-fit">Fit width</button>'
+    + '<button data-act="v-in" aria-label="Zoom in">+</button>'
+    + '<button data-act="v-close">Done</button>'
+    + '</div></div>';
+
+  wireViewer();
+}
+
+function vEls(){
+  return {
+    stage: document.getElementById("vstage"),
+    img: document.getElementById("vimg")
+  };
+}
+
+function applyTransform(){
+  var e = vEls();
+  if (!e.img || !e.img.style) return;
+  var v = ui.viewer;
+  e.img.style.transform = "translate(" + v.x + "px," + v.y + "px) scale(" + v.k + ")";
+}
+
+/* Keep the image from being dragged off into nothing. */
+function clampViewer(){
+  var v = ui.viewer, e = vEls();
+  if (!v || !e.stage || !e.stage.clientWidth) return;
+  var sw = e.stage.clientWidth, sh = e.stage.clientHeight;
+  var w = v.nw * v.k, h = v.nh * v.k;
+  v.x = w <= sw ? (sw - w) / 2 : Math.min(0, Math.max(sw - w, v.x));
+  v.y = h <= sh ? (sh - h) / 2 : Math.min(0, Math.max(sh - h, v.y));
+}
+
+function fitViewer(){
+  var v = ui.viewer, e = vEls();
+  if (!v || !e.stage || !e.stage.clientWidth || !v.nw) return;
+  v.fit = e.stage.clientWidth / v.nw;
+  v.k = v.fit;
+  v.x = 0;
+  v.y = 0;
+  clampViewer();
+  applyTransform();
+}
+
+/* Zoom about a fixed point so the thing you're looking at stays put. */
+function zoomAt(factor, px, py){
+  var v = ui.viewer;
+  if (!v) return;
+  var k2 = Math.min(8, Math.max(v.fit * 0.5, v.k * factor));
+  var ratio = k2 / v.k;
+  v.x = px - (px - v.x) * ratio;
+  v.y = py - (py - v.y) * ratio;
+  v.k = k2;
+  clampViewer();
+  applyTransform();
+}
+
+function wireViewer(){
+  var e = vEls();
+  if (!e.img || !e.stage || !e.img.addEventListener) return;
+
+  e.img.addEventListener("load", function(){
+    var v = ui.viewer;
+    if (!v) return;
+    v.nw = e.img.naturalWidth || 1;
+    v.nh = e.img.naturalHeight || 1;
+    e.img.style.width = v.nw + "px";
+    e.img.style.height = v.nh + "px";
+    fitViewer();
+  });
+
+  var pts = {};      // active pointers
+  var start = null;  // pinch baseline
+  var lastTap = 0;
+
+  function mid(a, b){ return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}; }
+  function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+  function local(ev){
+    var r = e.stage.getBoundingClientRect();
+    return {x: ev.clientX - r.left, y: ev.clientY - r.top};
+  }
+
+  e.stage.addEventListener("pointerdown", function(ev){
+    e.stage.setPointerCapture && e.stage.setPointerCapture(ev.pointerId);
+    pts[ev.pointerId] = local(ev);
+    var ids = Object.keys(pts);
+    if (ids.length === 2){
+      var a = pts[ids[0]], b = pts[ids[1]];
+      start = {d: dist(a, b), k: ui.viewer.k, m: mid(a, b), x: ui.viewer.x, y: ui.viewer.y};
+    } else if (ids.length === 1){
+      var now = Date.now();
+      if (now - lastTap < 300){
+        var v = ui.viewer;
+        var p = pts[ids[0]];
+        if (v.k > v.fit * 1.2) fitViewer(); else zoomAt(2.5, p.x, p.y);
+        lastTap = 0;
+      } else lastTap = now;
+    }
+  });
+
+  e.stage.addEventListener("pointermove", function(ev){
+    if (!pts[ev.pointerId] || !ui.viewer) return;
+    var prev = pts[ev.pointerId];
+    var cur = local(ev);
+    pts[ev.pointerId] = cur;
+    var ids = Object.keys(pts);
+
+    if (ids.length >= 2 && start){
+      var a = pts[ids[0]], b = pts[ids[1]];
+      var d = dist(a, b);
+      if (start.d > 0){
+        var v = ui.viewer;
+        var k2 = Math.min(8, Math.max(v.fit * 0.5, start.k * (d / start.d)));
+        var ratio = k2 / start.k;
+        v.x = start.m.x - (start.m.x - start.x) * ratio;
+        v.y = start.m.y - (start.m.y - start.y) * ratio;
+        v.k = k2;
+        clampViewer();
+        applyTransform();
+      }
+      ev.preventDefault();
+      return;
+    }
+
+    ui.viewer.x += cur.x - prev.x;
+    ui.viewer.y += cur.y - prev.y;
+    clampViewer();
+    applyTransform();
+    ev.preventDefault();
+  });
+
+  function release(ev){
+    delete pts[ev.pointerId];
+    if (Object.keys(pts).length < 2) start = null;
+  }
+  e.stage.addEventListener("pointerup", release);
+  e.stage.addEventListener("pointercancel", release);
+  e.stage.addEventListener("pointerleave", release);
+}
+
 /* ============================ app state ============================ */
 var state = null;
 var ui = {tab:"ledger", view:"urgent", editing:null, sheet:null, scan:{running:false,status:"",error:""},
           importMode:"merge", dataMsg:"", dataErr:"", addChoice:"",
-          scanResults:[], scanPicks:{}, ocr:{running:false,status:"",pct:0,error:""}};
+          scanResults:[], scanPicks:{}, ocr:{running:false,status:"",pct:0,error:""},
+          shots:{}, viewer:null};
 var toastTimer = null;
 
 function esc(s){
@@ -1144,13 +1324,40 @@ function bdayRow(r, origin){
 }
 
 /* ---------------- sheets ---------------- */
+var lastSheetKey = null;
+
 function renderSheet(){
   var el = document.getElementById("sheet");
+  var key = ui.editing ? ("edit:" + ui.editing) : (ui.sheet || "");
+
+  // Preserve scroll when re-rendering the same sheet, and don't replay the
+  // open animation — that combination is what made the panel jitter.
+  var prev = el.querySelector ? el.querySelector(".sheet") : null;
+  var keepScroll = (key === lastSheetKey && prev) ? prev.scrollTop : null;
+
   if (ui.editing) el.innerHTML = editSheet(rowById(ui.editing));
   else if (ui.sheet === "settings") el.innerHTML = settingsSheet();
   else if (ui.sheet === "data") el.innerHTML = dataSheet();
   else if (ui.sheet === "scan") el.innerHTML = scanSheet();
   else { el.innerHTML = ""; }
+
+  var now = el.querySelector ? el.querySelector(".sheet") : null;
+  if (now && keepScroll !== null){
+    now.style.animation = "none";
+    now.scrollTop = keepScroll;
+  }
+  lastSheetKey = key || null;
+}
+
+/* Progress ticks arrive many times a second. Patch the two nodes that change
+   instead of rebuilding the sheet, or the panel flickers and you can't scroll
+   it while a scan is running. */
+function tickProgress(){
+  var s = document.getElementById("ocr-status");
+  var b = document.getElementById("ocr-bar");
+  if (!s || !b || s.textContent === undefined){ renderSheet(); return; }
+  s.textContent = ui.ocr.status;
+  if (b.style) b.style.width = ui.ocr.pct + "%";
 }
 function sheetShell(title, subtitle, body){
   return '<div class="sheet-wrap" role="dialog" aria-modal="true"><div class="scrim" data-act="close"></div>'
@@ -1265,14 +1472,20 @@ function scanSheet(){
   }
 
   if (ui.ocr.running){
-    b += '<p class="sub" style="margin-top:1rem">'+esc(ui.ocr.status)+'</p>'
-      + '<div class="bar" style="margin-top:.75rem"><div class="bar-fill" style="width:'+ui.ocr.pct+'%"></div></div>';
+    b += '<p class="sub" id="ocr-status" style="margin-top:1rem">'+esc(ui.ocr.status)+'</p>'
+      + '<div class="bar" style="margin-top:.75rem"><div class="bar-fill" id="ocr-bar" style="width:'+ui.ocr.pct+'%"></div></div>';
   }
 
   if (ui.ocr.error) b += '<p class="error">'+esc(ui.ocr.error)+'</p>';
 
   ui.scanResults.forEach(function(res, ri){
-    b += '<hr class="divider"><p class="sub" style="margin:0">'+esc(res.file)+'</p>'
+    b += '<hr class="divider"><p class="sub" style="margin:0">'+esc(res.file)+'</p>';
+    if (ui.shots[ri]){
+      b += '<div class="shot-wrap" data-act="zoom" data-id="'+ri+'">'
+        + '<img class="shot-thumb" src="'+esc(ui.shots[ri])+'" alt="Screenshot being reviewed">'
+        + '<span class="shot-tag">Tap to enlarge</span></div>';
+    }
+    b += ''
       + '<label class="field">Brand<select class="select" data-act="scan-brand" data-v="'+ri+'">'
       + '<option value="">— skip this image —</option>';
     state.rows.forEach(function(r){
@@ -1343,10 +1556,11 @@ function runScan(files){
       ui.ocr.pct = pct;
       ui.ocr.status = "Reading " + file.name +
         (tileCount > 1 ? " (" + tileCount + " sections)" : "") + "…";
-      renderSheet();
+      tickProgress();
     }).then(function(text){
       var parsed = parseScreenshot(text);
       parsed.file = file.name;
+      try { ui.shots[ui.scanResults.length] = URL.createObjectURL(file); } catch (e) {}
       ui.scanResults.push(parsed);
       done++;
       next();
@@ -1356,6 +1570,13 @@ function runScan(files){
     });
   }
   next();
+}
+
+function releaseShots(){
+  Object.keys(ui.shots).forEach(function(k){
+    try { URL.revokeObjectURL(ui.shots[k]); } catch (e) {}
+  });
+  ui.shots = {};
 }
 
 function applyScan(){
@@ -1389,7 +1610,8 @@ function applyScan(){
     return c;
   });
 
-  ui.scanResults = []; ui.scanPicks = {}; ui.sheet = null;
+  ui.scanResults = []; ui.scanPicks = {}; ui.sheet = null; ui.viewer = null;
+  releaseShots();
   patchRows(rows);
   flash(touched ? "Updated " + touched + " brand" + (touched===1?"":"s") : "Nothing applied");
 }
@@ -1450,6 +1672,7 @@ document.addEventListener("click", function(ev){
   else if (act === "close"){
     ui.editing = null; ui.sheet = null; ui.dataMsg = ""; ui.dataErr = "";
     ui.scanResults = []; ui.scanPicks = {}; ui.ocr = {running:false,status:"",pct:0,error:""};
+    ui.viewer = null; releaseShots(); renderViewer();
     renderSheet();
   }
   else if (act === "settings"){ ui.sheet = "settings"; ui.editing = null; renderSheet(); }
@@ -1462,6 +1685,15 @@ document.addEventListener("click", function(ev){
     renderSheet();
   }
   else if (act === "scan-apply"){ applyScan(); }
+  else if (act === "zoom"){ openViewer(Number(id)); }
+  else if (act === "v-close"){ closeViewer(); }
+  else if (act === "v-fit"){ fitViewer(); }
+  else if (act === "v-in" || act === "v-out"){
+    var st = document.getElementById("vstage");
+    var cx = st && st.clientWidth ? st.clientWidth / 2 : 0;
+    var cy = st && st.clientHeight ? st.clientHeight / 2 : 0;
+    zoomAt(act === "v-in" ? 1.6 : 1 / 1.6, cx, cy);
+  }
   else if (act === "paste-scan"){
     var raw = val("f-ocrpaste").trim();
     if (!raw) return;
@@ -1576,6 +1808,10 @@ document.addEventListener("click", function(ev){
       render(); flash("Erased");
     }
   }
+});
+
+document.addEventListener("keydown", function(ev){
+  if (ev.key === "Escape" && ui.viewer) closeViewer();
 });
 
 document.addEventListener("change", function(ev){
