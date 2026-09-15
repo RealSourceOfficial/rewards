@@ -10,6 +10,10 @@
 #   ./capture.sh run wendys        capture one entry
 #   ./capture.sh push              copy the results back to the phone's gallery
 #
+# Why not just use Samsung's scroll capture? A stitched capture is one enormous
+# image, and long ones get downscaled. screencap gives you native-resolution
+# PNG every time, so text stays large enough to read.
+#
 # Pair the phone first (Android 11+, no cable):
 #   Settings > Developer options > Wireless debugging > Pair device with code
 #   adb pair <ip>:<pair-port>          then      adb connect <ip>:<port>
@@ -52,7 +56,10 @@ cmd_init() {
   need_device
   [ -f "$CONF" ] && die "$CONF already exists. Delete it first if you want a fresh one."
   {
-    echo "# One line per app:  slug <TAB> package <TAB> tab labels to visit (comma separated)"
+    echo "# One line per app:  slug <TAB> package <TAB> tab labels <TAB> pages (optional)"
+    echo "# 'pages' captures that many screens per tab, scrolling between each."
+    echo "# Use it for long rewards catalogues instead of a scroll capture — you get"
+    echo "# full-resolution PNGs with no stitching and no downscale."
     echo "# Tab labels are matched against on-screen text, case-insensitive."
     echo "# A label of '-' means: just screenshot whatever opens."
     echo "#"
@@ -65,7 +72,7 @@ cmd_init() {
       | sort \
       | while read -r pkg; do
           slug=$(printf '%s' "$pkg" | awk -F. '{print $NF}' | tr -cd 'a-z0-9')
-          printf '%s\t%s\t%s\n' "$slug" "$pkg" "Rewards,Offers"
+          printf '%s\t%s\t%s\t%s\n' "$slug" "$pkg" "Rewards,Offers" "3"
         done
   } > "$CONF"
   note "Wrote $CONF"
@@ -108,6 +115,19 @@ tap_label() {
   return 0
 }
 
+screen_size() {
+  adb shell wm size 2>/dev/null | sed -n 's/.*: *\([0-9]*\)x\([0-9]*\).*/\1 \2/p' | head -1
+}
+
+# Scroll down roughly one screen.
+page_down() {
+  local sz w h
+  sz=$(screen_size); w=${sz%% *}; h=${sz##* }
+  [ -z "$w" ] && { w=1080; h=2400; }
+  adb shell input swipe $((w / 2)) $((h * 78 / 100)) $((w / 2)) $((h * 26 / 100)) 450
+  sleep 1
+}
+
 shoot() {
   local name="$1"
   adb exec-out screencap -p > "$OUT/$name.png" 2>/dev/null
@@ -123,7 +143,9 @@ shoot() {
 # ---------------------------------------------------------------- run
 
 capture_app() {
-  local slug="$1" pkg="$2" labels="$3"
+  local slug="$1" pkg="$2" labels="$3" pages="${4:-1}"
+  case "$pages" in ''|*[!0-9]*) pages=1 ;; esac
+  [ "$pages" -lt 1 ] && pages=1
 
   printf '\n%s (%s)\n' "$slug" "$pkg"
   adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 \
@@ -141,7 +163,18 @@ capture_app() {
     label=$(printf '%s' "$label" | sed 's/^ *//;s/ *$//')
     [ -z "$label" ] && continue
     if tap_label "$label"; then
-      shoot "${slug}-$(printf '%s' "$label" | tr '[:upper:] ' '[:lower:]-')" && shot_any=1
+      local base
+      base="${slug}-$(printf '%s' "$label" | tr '[:upper:] ' '[:lower:]-')"
+      local n=1
+      while [ "$n" -le "$pages" ]; do
+        if [ "$pages" -gt 1 ]; then
+          shoot "${base}-p${n}" && shot_any=1
+        else
+          shoot "$base" && shot_any=1
+        fi
+        [ "$n" -lt "$pages" ] && page_down
+        n=$((n + 1))
+      done
     fi
   done
 
@@ -159,10 +192,10 @@ cmd_run() {
   local only="${1:-}"
   local count=0
 
-  while IFS=$'\t' read -r slug pkg labels; do
+  while IFS=$'\t' read -r slug pkg labels pages; do
     case "$slug" in ''|\#*) continue ;; esac
     [ -n "$only" ] && [ "$slug" != "$only" ] && continue
-    capture_app "$slug" "$pkg" "${labels:-}"
+    capture_app "$slug" "$pkg" "${labels:-}" "${pages:-1}"
     count=$((count + 1))
   done < "$CONF"
 

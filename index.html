@@ -496,46 +496,64 @@ var TESSERACT_SRC = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.
 /* Extra words that identify a brand in OCR text, beyond its own name. */
 var BRAND_HINTS = {
   jackbox: ["jack in the box","jack pack","sourdough jack","breakfast jack"],
-  wendys: ["wendy","wendys","frosty","baconator"],
+  wendys: ["wendy","wendys","frosty","baconator","dave's single","dave's double","junior bacon cheeseburger"],
   starbucks: ["starbucks","rewards menu","handcrafted drink"],
   ihop: ["ihop","pancoin","stack market","international bank of pancakes","short stack"],
-  popeyes: ["popeyes","signature chicken","3pc tenders","6pc wings"],
-  mcd: ["mcdonald","mymcdonald","mccafe","big mac"],
-  tacobell: ["taco bell","cantina","crunchwrap"],
+  popeyes: ["popeyes","butterfly shrimp","bone-in wings combo","louisiana kitchen"],
+  mcd: ["mcdonald","mymcdonald","mccafe","big mac","quarter pounder","mcnugget","mcmuffin","mcgriddles","mcdelivery","mcchicken","mcflurry","filet-o-fish","happy meal"],
+  tacobell: ["taco bell","cantina","crunchwrap","tuesday drops","unlock fire"],
   chipotle: ["chipotle","burrito bowl"],
-  dq: ["dairy queen","blizzard"],
-  bk: ["burger king","royal perks","whopper"],
-  arbys: ["arby","curly fries","beef n cheddar"],
-  subway: ["subway","mvp rewards","footlong"],
-  dominos: ["domino","piece of the pie"],
-  pizzahut: ["pizza hut","hut rewards"],
-  papajohns: ["papa john","papa rewards"],
-  littlecaesars: ["little caesars","hot-n-ready","hot n ready"],
+  dq: ["dairy queen","blizzard","dq rewards","dilly bar","stackburger","misty slush","buster bar"],
+  bk: ["burger king","royal perks","whopper","rodeo burger","chicken fries"],
+  arbys: ["arby","curly fries","beef n cheddar","beef bank","jamocha","potato cakes"],
+  subway: ["subway","mvp rewards","footlong","sub club","subway cash"],
+  dominos: ["domino","piece of the pie","stuffed cheesy bread","lava cake"],
+  pizzahut: ["pizza hut","hut rewards","personal pan pizza","cinnabon mini rolls","the big new yorker","hut box"],
+  papajohns: ["papa john","papa rewards","papa dough","papa pairings"],
+  littlecaesars: ["little caesars","hot-n-ready","hot n ready","webberoni","crazy bread"],
   jerseymikes: ["jersey mike","shore points"],
-  jimmyjohns: ["jimmy john","freaky fast"],
+  jimmyjohns: ["jimmy john","freaky fast","kickin' ranch","jimmy chips","jimmy pickle"],
   krispykreme: ["krispy kreme","original glazed"],
   dutch: ["dutch bros","dutch rewards"],
-  "7eleven": ["7-eleven","7 eleven","7rewards","big gulp"],
-  churchs: ["church's","churchs","texas chicken"],
-  carls: ["carl's jr","carls jr","famous star"],
+  "7eleven": ["7-eleven","7 eleven","7rewards","big gulp","7-select","beverage club","slurpee"],
+  churchs: ["church's","churchs","texas chicken","honey-butter biscuit","real rewards","tender wraps"],
+  carls: ["carl's jr","carls jr","famous star","big carl","appy hour","stars earned"],
   walmart: ["walmart","walmart cash"],
   gasbuddy: ["gasbuddy","gas buddy"]
 };
 
-/* "Expires in 6 days" / "Expires on 09/26" / "Expires 09/28/2026" */
-function parseExpiry(text){
-  var t = String(text || "").toLowerCase();
+/* Real formats seen across these apps:
+     "Expires in 6 days"            "Expires on 09/26"
+     "Expires 09/28/2026"           "Expires 9/15/26"
+     "Valid thru 10/13"             "Offer expires 10/27/26"
+     "Deal expires in 6 days."      "Deal expires on 09/27/2026."
+     "Expires Sep 26, 2026"         "Expires 09/27/2026, 11:59 PM PDT"   */
+var MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
 
-  var rel = t.match(/expires?\s+in\s+(\d+)\s*days?/);
+function parseExpiry(text){
+  var t = String(text || "").toLowerCase().replace(/\s+/g, " ");
+
+  var rel = t.match(/(?:expires?|valid|ends?)\s+in\s+(\d+)\s*days?/);
   if (rel){
     var d = today();
     d.setDate(d.getDate() + Number(rel[1]));
     return isoOf(d);
   }
-  if (/expires?\s+(today|tomorrow)/.test(t)){
+  if (/(?:expires?|ends?)\s+(today|tomorrow)/.test(t)){
     var d2 = today();
     if (/tomorrow/.test(t)) d2.setDate(d2.getDate() + 1);
     return isoOf(d2);
+  }
+
+  // "Sep 26, 2026" / "September 26 2026"
+  var named = t.match(/\b([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s*(\d{4})?\b/);
+  if (named && MONTHS[named[1].slice(0, 4)] !== undefined || (named && MONTHS[named[1].slice(0, 3)])){
+    var mo2 = MONTHS[named[1].slice(0, 4)] || MONTHS[named[1].slice(0, 3)];
+    if (mo2){
+      var day2 = Number(named[2]);
+      var yr2 = named[3] ? Number(named[3]) : rollForward(mo2, day2);
+      if (day2 >= 1 && day2 <= 31) return isoOf(new Date(yr2, mo2 - 1, day2));
+    }
   }
 
   var abs = t.match(/(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?/);
@@ -547,12 +565,17 @@ function parseExpiry(text){
     yr = Number(abs[3]);
     if (yr < 100) yr += 2000;
   } else {
-    // No year printed: assume the next time that date comes around.
-    var now = today();
-    yr = now.getFullYear();
-    if (new Date(yr, mo - 1, day) < now) yr += 1;
+    yr = rollForward(mo, day);
   }
   return isoOf(new Date(yr, mo - 1, day));
+}
+
+/* A date with no year printed means the next time it comes around. */
+function rollForward(mo, day){
+  var now = today();
+  var yr = now.getFullYear();
+  if (new Date(yr, mo - 1, day) < now) yr += 1;
+  return yr;
 }
 function isoOf(d){
   return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
@@ -572,6 +595,12 @@ function detectBrand(text){
   return best;
 }
 
+/* Lines that look like a date but are really buttons, badges or fine print. */
+var JUNK_LINE = /^(featured|for you|new|welcome|welcome deal|limited time|available offers|your offers|offers|rewards|my rewards|deals|terms|see terms|see details|see full terms and conditions|view details|view offers|read more|redeem|order now|add deal|apply code|offer details|have a promo code\??|valid \d+x\/(day|week)|deal applied!?|carryout only|minimum spend \$\d+|\$[\d.]+ each!?|online use only|expires soon|national cheeseburger day|deal)$/i;
+
+/* What counts as an expiry line. */
+var EXPIRY_LINE = /(?:expires?|valid thru|valid through|offer ends?|ends on)\b/i;
+
 /* Pull balance, cheapest reward threshold and dated offers out of OCR text.
    Deliberately conservative: a missing field beats a wrong one, because a
    wrong expiration date sends you driving for a coupon that already died. */
@@ -581,33 +610,79 @@ function parseScreenshot(raw){
   var flat = text.toLowerCase().replace(/[’']/g, "'");
   var out = {brandId: detectBrand(text), balance: null, threshold: null, deals: []};
 
-  /* ---- current balance ---- */
-  var bal =
-      flat.match(/you\s+have\s+([\d,]+)\s*[\u2605*]/)          // Starbucks: "You have 0★"
-   || flat.match(/([\d,]+)\s*(?:\u2605|stars?)\s+ready/)
-   || flat.match(/\b([\d,]+)\s*points?\b(?!\s*(?:to go|away|each))/) // "0 POINTS"
-   || flat.match(/pancoins?\s*[:\s]\s*([\d,]+)/)
-   || flat.match(/([\d,]+)\s*pancoins?/);
-  if (bal) out.balance = Number(bal[1].replace(/,/g, ""));
+  /* Earn-rate copy ("$1 = 10 Points", "10 PTS/$1", "Earn 10 points per $1
+     spent", "$1 spent = 10 Stars") reads exactly like a cheap reward. Drop
+     those lines before looking at any number. */
+  flat = flat.split("\n").filter(function(l){
+    return !/(\$\s*[\d.]+\s*(?:spent\s*)?=)|(per\s*\$\s*[\d.]+)|((?:pts|points)\s*\/\s*\$)|(=\s*\$[\d.]+\s*(?:papa dough|subway))/i.test(l);
+  }).join("\n");
 
-  /* ---- cheapest reward threshold ---- */
+  /* ---- current balance ----
+     Every app words this differently. Ordered most-specific first. */
+  var num = "([\\d][\\d,]*)";
+  var BAL = [
+    /no points yet/i,                                    // Jimmy John's — means zero
+    new RegExp("redeemable stars\\s*" + num, "i"),       // Starbucks
+    /you\s+have\s+([\d,]+)\s*[\u2605*]/i,                // "You have 0★"
+    new RegExp("you'?ve got\\s*" + num + "\\s*points?", "i"),   // Church's, Chipotle
+    new RegExp(num + "\\s*available\\s*(?:dq\\s*®?\\s*)?points?", "i"), // DQ
+    new RegExp("available\\s*points?\\s*" + num, "i"),   // Pizza Hut, Popeyes
+    new RegExp(num + "\\s*stars?\\s+earned", "i"),       // Carl's Jr
+    new RegExp(num + "\\s*lifetime\\s+points", "i"),     // Taco Bell
+    new RegExp("current\\s+points\\s*" + num, "i"),      // Subway
+    new RegExp(num + "\\s*shore\\s*points", "i"),        // Jersey Mike's
+    new RegExp("^\\s*" + num + "\\s*\\/\\s*\\d+\\s*points", "im"), // Papa Johns "0/10 POINTS"
+    new RegExp(num + "\\s*pancoins?", "i"),
+    new RegExp("pancoins?\\s*" + num, "i"),
+    new RegExp(num + "\\s*pts\\b(?!\\s*\\/)", "i"),      // McDonald's "11888 pts", 7-Eleven "800 pts"
+    new RegExp("\\b" + num + "\\s*points?\\b(?!\\s*(?:to go|away|each|rewards|to unlock|for\\s*\\$))", "i"),
+  ];
+  for (var bi = 0; bi < BAL.length; bi++){
+    var bm = flat.match(BAL[bi]);
+    if (bm){ out.balance = bm[1] === undefined ? 0 : Number(String(bm[1]).replace(/,/g, "")); break; }
+  }
+
+  /* ---- what the next reward costs ----
+     Two independent signals: explicit "points to go" style copy, and the
+     cheapest item price in a rewards catalogue. Prefer the former — it's
+     what the app itself says you need. */
+  var togo = null;
+  var TOGO = [
+    new RegExp(num + "\\s*(?:more\\s*)?(?:pts|points)\\s*to\\s*(?:go|unlock)", "i"),
+    new RegExp("you are\\s*" + num + "\\s*points?\\s*away", "i"),
+    new RegExp(num + "\\s*points?\\s*away\\s*from", "i"),
+    new RegExp(num + "\\s*more\\s*points?\\s*to\\s*unlock", "i"),
+    new RegExp("next\\s*reward:?\\s*" + num + "\\s*(?:pts|points)", "i"),
+    new RegExp(num + "\\s*more\\s*(?:pts|points)", "i"),
+    new RegExp("unlock at\\s*" + num + "\\s*stars?", "i"),
+    new RegExp("^\\s*\\d+\\s*\\/\\s*" + num + "\\s*points", "im"),  // "0/10 POINTS"
+  ];
+  for (var ti = 0; ti < TOGO.length; ti++){
+    var tm = flat.match(TOGO[ti]);
+    if (tm){ togo = Number(tm[1].replace(/,/g, "")); break; }
+  }
+
   var costs = [];
-  // \b can't follow ★ (neither side is a word character), so the star and word
-  // forms need separate boundary handling.
-  var re = /([\d,]+)\s*(?:points?\b|stars?\b|[\u2605\u2606*])/gi, m;
+  var re = /([\d,]+)\s*(?:points?\b|pts\b|stars?\b|[\u2605\u2606*])/gi, m;
   while ((m = re.exec(flat)) !== null){
     var n = Number(m[1].replace(/,/g, ""));
-    // "0 points" is a balance, not a price; ignore it and absurd values
     if (n > 0 && n <= 100000) costs.push(n);
   }
-  // Drop the balance value if it leaked into the list
   if (out.balance !== null) costs = costs.filter(function(c){ return c !== out.balance; });
-  if (costs.length) out.threshold = Math.min.apply(null, costs);
+
+  if (togo !== null && togo > 0){
+    // "N points to go" is relative to what you have.
+    out.threshold = togo + (out.balance || 0);
+  } else if (costs.length){
+    out.threshold = Math.min.apply(null, costs);
+  }
 
   /* ---- offers ---- */
   var seen = {};
   lines.forEach(function(line, i){
-    if (!/expires?\b/i.test(line)) return;
+    if (!EXPIRY_LINE.test(line)) return;
+    // "EXPIRES SOON" and friends are badges, not dates.
+    if (!/\d/.test(line) && !/(today|tomorrow)/i.test(line)) return;
     var ends = parseExpiry(line);
 
     // The title is the nearest preceding line that reads like an offer.
@@ -615,7 +690,7 @@ function parseScreenshot(raw){
     for (var j = i - 1; j >= 0 && j >= i - 4; j--){
       var cand = lines[j];
       if (/expires?\b/i.test(cand)) continue;
-      if (/^(featured|for you|new|welcome deal|available offers|your offers|offers|rewards)$/i.test(cand)) continue;
+      if (JUNK_LINE.test(cand)) continue;
       if (cand.length < 4) continue;
       // Wrapped titles: glue the previous line on if this one looks like a tail
       if (j > 0 && /^[a-z(]/.test(cand) && lines[j-1].length > 4 && !/expires?\b/i.test(lines[j-1])){
@@ -657,17 +732,107 @@ function loadTesseract(){
   return tesseractLoading;
 }
 
+/* Screenshots are hostile to OCR in two specific ways, and both need fixing
+   before Tesseract sees a pixel:
+
+   1. Scroll captures come off the phone at reduced width — often 720px for a
+      whole screen, sometimes less. That leaves body text around 8-10px tall.
+      Tesseract wants roughly 30px. So we upscale small images before OCR.
+   2. Those same captures are absurdly tall (35:1 in the worst case here).
+      Page segmentation assumes something page-shaped, so we slice tall images
+      into overlapping tiles and read each one separately.
+
+   Grayscale and a contrast stretch also help, because these UIs love thin
+   light-grey type on white and reversed text on brand colours. */
+var OCR_TARGET_W = 1500;   // upscale narrow captures to about this
+var OCR_TILE_H = 1600;     // max tile height fed to the engine
+var OCR_TILE_OVERLAP = 140; // so a line split across tiles survives somewhere
+
+function loadBitmap(file){
+  return new Promise(function(resolve, reject){
+    var url = URL.createObjectURL(file);
+    var img = new Image();
+    img.onload = function(){ URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error("Couldn't read that image.")); };
+    img.src = url;
+  });
+}
+
+/* Returns an array of canvases ready for OCR. */
+function prepTiles(img){
+  var scale = 1;
+  if (img.width < OCR_TARGET_W) scale = Math.min(3, OCR_TARGET_W / img.width);
+  var w = Math.round(img.width * scale);
+  var h = Math.round(img.height * scale);
+
+  // Keep total work bounded on very long captures.
+  var MAX_PX = 40e6;
+  if (w * h > MAX_PX){
+    var k = Math.sqrt(MAX_PX / (w * h));
+    w = Math.round(w * k); h = Math.round(h * k);
+  }
+
+  var full = document.createElement("canvas");
+  full.width = w; full.height = h;
+  var fc = full.getContext("2d", {willReadFrequently: true});
+  fc.imageSmoothingEnabled = true;
+  fc.imageSmoothingQuality = "high";
+  fc.drawImage(img, 0, 0, w, h);
+
+  // Grayscale + contrast stretch. Not a hard threshold: these screens mix
+  // dark-on-light and light-on-dark, and binarising kills one of them.
+  try {
+    var d = fc.getImageData(0, 0, w, h);
+    var p = d.data;
+    for (var i = 0; i < p.length; i += 4){
+      var g = (p[i] * 0.299 + p[i+1] * 0.587 + p[i+2] * 0.114);
+      g = (g - 128) * 1.45 + 128;          // stretch
+      g = g < 0 ? 0 : (g > 255 ? 255 : g);
+      p[i] = p[i+1] = p[i+2] = g;
+    }
+    fc.putImageData(d, 0, 0);
+  } catch (e) { /* tainted or out of memory — carry on with the raw pixels */ }
+
+  if (h <= OCR_TILE_H) return [full];
+
+  var tiles = [];
+  var y = 0;
+  while (y < h){
+    var th = Math.min(OCR_TILE_H, h - y);
+    var t = document.createElement("canvas");
+    t.width = w; t.height = th;
+    t.getContext("2d").drawImage(full, 0, y, w, th, 0, 0, w, th);
+    tiles.push(t);
+    if (y + th >= h) break;
+    y += th - OCR_TILE_OVERLAP;
+  }
+  return tiles;
+}
+
 function ocrImage(file, onProgress){
-  return loadTesseract().then(function(T){
-    return T.recognize(file, "eng", {
-      logger: function(m){
-        if (m && m.status === "recognizing text" && typeof m.progress === "number"){
-          onProgress(Math.round(m.progress * 100));
+  var T, tiles;
+  return loadTesseract().then(function(lib){
+    T = lib;
+    return loadBitmap(file);
+  }).then(function(img){
+    tiles = prepTiles(img);
+    var out = [];
+    var i = 0;
+    function step(){
+      if (i >= tiles.length) return Promise.resolve(out.join("\n"));
+      var idx = i++;
+      return T.recognize(tiles[idx], "eng", {
+        logger: function(m){
+          if (m && m.status === "recognizing text" && typeof m.progress === "number"){
+            onProgress(Math.round(((idx + m.progress) / tiles.length) * 100), tiles.length);
+          }
         }
-      }
-    });
-  }).then(function(res){
-    return (res && res.data && res.data.text) || "";
+      }).then(function(res){
+        out.push((res && res.data && res.data.text) || "");
+        return step();
+      });
+    }
+    return step();
   });
 }
 
@@ -1050,6 +1215,12 @@ function scanSheet(){
       + '<input id="f-shots" type="file" accept="image/*" multiple hidden>'
       + '<p class="sub" style="margin-top:1rem">You can also select screenshots in your gallery and '
       + 'share them to this app — they land straight here.</p>'
+      + '<hr class="divider"><p class="section" style="margin-top:0">Paste text instead</p>'
+      + '<p class="sub">Android reads screenshots better than this app can. Open a screenshot, '
+      + 'long-press the text, Select all, Copy — then paste below. One screen at a time, or several '
+      + 'separated by a blank line.</p>'
+      + '<label class="field"><textarea id="f-ocrpaste" rows="5" placeholder="Paste copied screen text"></textarea></label>'
+      + '<button class="btn btn-ghost" style="margin-top:.5rem" data-act="paste-scan">Read pasted text</button>'
       + '<p class="note">First run downloads the OCR engine, about 5 MB, and caches it. '
       + 'After that it works offline. Reading each image takes a few seconds.</p>';
   }
@@ -1129,8 +1300,11 @@ function runScan(files){
     ui.ocr.status = "Reading " + file.name + "…";
     ui.ocr.pct = 0;
     renderSheet();
-    ocrImage(file, function(pct){
-      ui.ocr.pct = pct; renderSheet();
+    ocrImage(file, function(pct, tileCount){
+      ui.ocr.pct = pct;
+      ui.ocr.status = "Reading " + file.name +
+        (tileCount > 1 ? " (" + tileCount + " sections)" : "") + "…";
+      renderSheet();
     }).then(function(text){
       var parsed = parseScreenshot(text);
       parsed.file = file.name;
@@ -1249,6 +1423,25 @@ document.addEventListener("click", function(ev){
     renderSheet();
   }
   else if (act === "scan-apply"){ applyScan(); }
+  else if (act === "paste-scan"){
+    var raw = val("f-ocrpaste").trim();
+    if (!raw) return;
+    // A blank line means "next screen".
+    var chunks = raw.split(/\n\s*\n\s*\n*/).filter(function(c){ return c.trim().length > 12; });
+    if (!chunks.length) chunks = [raw];
+    var added = 0;
+    chunks.forEach(function(c, i){
+      var parsed = parseScreenshot(c);
+      if (parsed.balance === null && parsed.threshold === null && !parsed.deals.length && !parsed.brandId) return;
+      parsed.file = chunks.length > 1 ? ("pasted text " + (i + 1)) : "pasted text";
+      ui.scanResults.push(parsed);
+      added++;
+    });
+    ui.ocr = {running:false, status:"", pct:0,
+      error: added ? "" : "Nothing recognisable in that text."};
+    renderSheet();
+    if (added) flash("Read " + added + " screen" + (added === 1 ? "" : "s"));
+  }
   else if (act === "toggle"){
     patchRows(state.rows.map(function(r){
       if (r.id !== id) return r;

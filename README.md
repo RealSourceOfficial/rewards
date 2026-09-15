@@ -101,9 +101,24 @@ enough that a glance is cheaper than driving somewhere for a dead coupon.
 First use downloads the OCR engine (tesseract.js, about 5 MB) from a CDN and caches it, so it works
 offline after that. No key, no account, and no image ever leaves the device.
 
-What it reads well: "0 POINTS", "You have 0★", "Expires in 6 days", "Expires 09/28/2026", and
-wrapped offer titles. What it won't guess: bare numbers with no unit next to them, like IHOP's Stack
-Market prices. It leaves those blank rather than inventing a value.
+What it reads well: "0 POINTS", "YOU'VE GOT 0 POINTS", "0 STARS EARNED", "11888 pts",
+"0/10 POINTS", "No points yet", "0 Shore Points", "Current Points 250", and for dates
+"Expires in 6 days", "Valid thru 10/13", "Offer expires 10/27/26", "Expires Sep 26, 2026".
+
+Earn-rate copy is ignored on purpose: "$1 = 10 Points" and "10 PTS/$1" read exactly like a
+10-point reward, and used to wreck the threshold.
+
+What it won't guess: bare numbers with no unit beside them, like IHOP's Stack Market prices. It
+leaves those blank rather than inventing a value.
+
+**Screenshot quality matters more than anything else here.** Set Settings > Advanced features >
+Screenshots and screen recorder > Screenshot format to **PNG**. JPEG ringing around thin light-grey
+text is exactly what breaks OCR, and these apps are full of thin light-grey text. Prefer several
+normal full-resolution screenshots over one long scroll capture.
+
+**Paste text is the accurate path.** Android's built-in OCR is ML Kit and is markedly better than
+tesseract on app UI. Open a screenshot, long-press the text, Select all, Copy, then paste into the
+box on the scan screen. Separate multiple screens with a blank line.
 
 **Points tab.** Tap a brand to open its app, read your balance, tap the row and type it in. The
 card at the top tells you where to eat next and why. Expiring points outrank a ready reward, since
@@ -217,6 +232,24 @@ starbucks   com.starbucks.mobilecard      Rewards
 Labels are matched against on-screen text via `uiautomator dump`, so they follow the app's own
 wording rather than fixed coordinates — which means a layout change usually costs you one label
 edit instead of a rewrite. Use `-` to just screenshot whatever opens.
+
+### Why this beats Samsung's scroll capture
+
+A scroll capture stitches everything into one enormous image, and past a certain
+length One UI downscales the result. A whole phone screen squeezed to 720px wide
+leaves body text around 8-10 pixels tall; OCR wants roughly 30.
+
+`screencap` sidesteps that entirely — every shot is native resolution, 1440px
+wide on an S25+, no stitching and no downscale. For long rewards catalogues put a
+page count in the fourth column of `apps.conf`:
+
+```
+mcd     com.mcdonalds.app    Rewards,Deals    4
+```
+
+That captures four screens per tab, scrolling between each. Overlap is harmless:
+offers are deduplicated by title and date on import, so the same deal appearing
+in two shots lands once.
 
 ### What this won't do
 

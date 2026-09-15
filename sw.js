@@ -6,7 +6,7 @@
  *
  * Bump CACHE whenever you replace index.html, or the old copy keeps serving.
  */
-var CACHE = "rewards-ledger-v2";
+var CACHE = "rewards-ledger-v3";
 
 /* The OCR engine and its language data are big and versioned, so once they've
    been fetched we keep them. Everything else cross-origin stays uncached. */
