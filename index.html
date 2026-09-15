@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rewards ledger</title>
+<meta name="description" content="Loyalty points, expiration dates and birthday perks in one place.">
+<meta name="theme-color" content="#1B2430">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+:root{--paper:#E9ECF1;--card:#fff;--ink:#1B2430;--ink60:#5A6675;--ink30:#9BA5B2;--rule:#CFD6DF;--loss:#BE3A2B;--soon:#C98A21;--gain:#1E7A5B;--r:10px}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font:16px/1.45 "Inter","Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:4px}
+.num{font-variant-numeric:tabular-nums}
+.shell{max-width:32rem;margin:0 auto;padding:0 1rem calc(4rem + env(safe-area-inset-bottom))}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:calc(1.75rem + env(safe-area-inset-top)) 0 1rem}
+.head h1{margin:0;font-size:1.875rem;font-weight:700;letter-spacing:-.02em;line-height:1}
+.sub{margin:.5rem 0 0;font-size:.875rem;color:var(--ink60)}
+.note{margin-top:2rem;font-size:.75rem;line-height:1.6;color:var(--ink30)}
+.card{background:var(--card);border-radius:var(--r);padding:1.25rem;box-shadow:0 1px 2px rgba(27,36,48,.08)}
+.tabs{display:flex;gap:1.25rem;border-bottom:1px solid var(--rule);margin-bottom:1.25rem}
+.tab{padding-bottom:.5rem;font-size:1rem;font-weight:600;color:var(--ink30);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+.filters{display:flex;gap:1rem;border-bottom:1px solid var(--rule);margin-top:2rem}
+.filters .tab{font-size:.875rem;font-weight:500}
+.pick{border-left:6px solid var(--ink)}
+.pick-label{margin:0;font-size:.875rem;color:var(--ink60)}
+.pick-name{margin:.25rem 0 0;font-size:2.25rem;font-weight:700;letter-spacing:-.025em;line-height:1}
+.pick-why{margin:.75rem 0 0}
+.pick-where{margin:.5rem 0 0;font-size:.875rem;color:var(--ink60)}
+.pick-actions{display:flex;gap:.75rem;margin-top:1rem}
+.pick-actions .btn{flex:1}
+.backups{display:flex;gap:.75rem;margin-top:.75rem}
+.backup{flex:1;background:var(--card);border-radius:var(--r);padding:.75rem;box-shadow:0 1px 2px rgba(27,36,48,.08)}
+.backup b{display:block;font-size:.875rem;line-height:1.2}
+.backup span{display:block;margin-top:.25rem;font-size:.75rem;line-height:1.2}
+.btn{display:block;width:100%;padding:.8rem 1rem;border-radius:var(--r);font-size:1rem;font-weight:600;text-align:center;text-decoration:none}
+.btn-solid{background:var(--ink);color:var(--paper)}
+.btn-solid[disabled]{background:var(--ink30)}
+.btn-ghost{border:1px solid var(--rule);color:var(--ink)}
+.btn-go{background:var(--gain);color:#fff}
+.btn-danger{color:var(--loss);font-size:.875rem;font-weight:500}
+.btn-quiet{width:100%;padding:.5rem 0;font-size:.875rem;color:var(--ink60)}
+.btn-small{padding:.5rem .75rem;font-size:.875rem;font-weight:500;border-radius:var(--r)}
+.pair{display:flex;gap:.75rem}
+.pair>*{flex:1}
+.list{list-style:none;margin:0;padding:0}
+.row{display:flex;align-items:center;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--rule)}
+.dot{width:2.25rem;height:2.25rem;flex-shrink:0;border-radius:50%}
+.row-main{flex:1;min-width:0}
+.row-name{display:block;font-size:1rem;font-weight:500;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-meta{display:flex;gap:.5rem;margin-top:.15rem;font-size:.75rem;line-height:1.2}
+.row-num{flex-shrink:0;text-align:right}
+.row-num b{display:block;font-size:1.25rem;font-weight:600;line-height:1}
+.row-num span{display:block;margin-top:.25rem;font-size:.75rem;line-height:1;color:var(--ink30)}
+.bday-count{margin:0;font-size:2.25rem;font-weight:700;letter-spacing:-.025em;line-height:1}
+.bar{position:relative;height:.75rem;margin-top:1.25rem;border-radius:999px;background:var(--paper);overflow:hidden}
+.bar-fill{height:100%;background:var(--ink);border-radius:999px}
+.bar-mark{position:absolute;top:0;height:100%;width:2px;background:var(--soon)}
+.bday-row{display:flex;align-items:flex-start;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--rule)}
+.check{width:1.5rem;height:1.5rem;flex-shrink:0;margin-top:.15rem;border:2px solid var(--rule);border-radius:5px;color:#fff;font-size:.875rem;font-weight:700;line-height:1;text-align:center}
+.check.on{background:var(--gain);border-color:var(--gain)}
+.bday-perk{display:block;margin-top:.15rem;font-size:.875rem;line-height:1.35}
+.section{margin:1.75rem 0 .25rem;font-size:1.125rem;font-weight:600}
+.field{display:block;margin-top:1rem;font-size:.875rem;color:var(--ink60)}
+.field input,.field select,.field textarea,.select{display:block;width:100%;margin-top:.25rem;padding:.75rem;font-size:1rem;border:1px solid var(--rule);border-radius:var(--r);background:var(--paper);color:var(--ink)}
+.field textarea{font:.875rem/1.4 ui-monospace,Menlo,monospace;resize:vertical}
+.seg{display:flex;gap:.5rem;margin-top:.5rem}
+.seg button{flex:1;padding:.5rem;font-size:.875rem;font-weight:500;border:1px solid var(--rule);border-radius:var(--r)}
+.seg button.on{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.divider{border:0;border-top:1px solid var(--rule);margin:1.25rem 0}
+.sheet-wrap{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.4)}
+.sheet{position:relative;width:100%;max-height:92vh;overflow-y:auto;background:var(--card);border-radius:1rem 1rem 0 0;padding:1.25rem 1.25rem calc(1.25rem + env(safe-area-inset-bottom));animation:rise .18s ease-out}
+@keyframes rise{from{transform:translateY(12px)}}
+.sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+.sheet-head h2{margin:0;font-size:1.5rem;font-weight:700;line-height:1.15}
+.sheet-head p{margin:0;font-size:.875rem;color:var(--ink60)}
+.close{font-size:1.5rem;line-height:1;color:var(--ink60);padding:0 .25rem}
+.place-chip{margin-top:.75rem;padding:.75rem;background:var(--paper);border-radius:var(--r);font-size:.875rem}
+.place-chip a{display:inline-block;margin-top:.25rem;color:var(--ink60)}
+.toast{position:fixed;left:50%;bottom:calc(1.25rem + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:.5rem 1rem;border-radius:999px;font-size:.875rem;box-shadow:0 4px 12px rgba(27,36,48,.25);z-index:60}
+.error{margin-top:.75rem;font-size:.875rem;color:var(--loss)}
+.warn{margin-top:.75rem;padding:.75rem;border-radius:var(--r);background:#FBEFEA;color:#7A2A1E;font-size:.8125rem;line-height:1.5}
+.stack>*+*{margin-top:.75rem}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sheet"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* Rewards ledger — one file, no build step, no dependencies.
+   Everything you type lives in this browser's localStorage. */
+
+/* ============================ catalogue ============================ */
+var SEED = [
+ {id:"tacobell",name:"Taco Bell",program:"Taco Bell Rewards",dot:"#702082",link:"https://www.tacobell.com",osm:"Taco Bell"},
+ {id:"ihop",name:"IHOP",program:"International Bank of Pancakes",dot:"#1B62B0",link:"https://www.ihop.com",osm:"IHOP",bday:"5 PanCoins — a full stack. May need a purchase."},
+ {id:"dq",name:"Dairy Queen",program:"DQ Rewards",dot:"#1E4FA3",link:"https://www.dairyqueen.com",osm:"Dairy Queen"},
+ {id:"wendys",name:"Wendy's",program:"Wendy's Rewards",dot:"#C8102E",link:"https://www.wendys.com",osm:"Wendy's"},
+ {id:"carls",name:"Carl's Jr.",program:"My Rewards",dot:"#E8B33B",link:"https://www.carlsjr.com",osm:"Carl's Jr"},
+ {id:"jackbox",name:"Jack in the Box",program:"Jack Pack",dot:"#D2232A",link:"https://www.jackinthebox.com",osm:"Jack in the Box"},
+ {id:"mcd",name:"McDonald's",program:"MyMcDonald's Rewards",dot:"#DA291C",link:"https://www.mcdonalds.com",osm:"McDonald's"},
+ {id:"dominos",name:"Domino's",program:"Piece of the Pie",dot:"#0B6AAE",link:"https://www.dominos.com",osm:"Domino's Pizza"},
+ {id:"bk",name:"Burger King",program:"Royal Perks",dot:"#D62300",link:"https://www.bk.com",osm:"Burger King"},
+ {id:"arbys",name:"Arby's",program:"Arby's Rewards",dot:"#C8102E",link:"https://www.arbys.com",osm:"Arby's",bday:"Free curly fries and a small shake. Coupon lands about a week early."},
+ {id:"starbucks",name:"Starbucks",program:"Stars",dot:"#00704A",link:"https://www.starbucks.com",osm:"Starbucks",bday:"Free drink or food item. Higher tiers get a 7-day window."},
+ {id:"popeyes",name:"Popeyes",program:"Popeyes Rewards",dot:"#F47B20",link:"https://www.popeyes.com",osm:"Popeyes"},
+ {id:"dutch",name:"Dutch Bros",program:"Dutch Rewards",dot:"#1B62B0",link:"https://www.dutchbros.com",osm:"Dutch Bros"},
+ {id:"littlecaesars",name:"Little Caesars",program:"Pizza Rewards",dot:"#F47B20",link:"https://littlecaesars.com",osm:"Little Caesars"},
+ {id:"7eleven",name:"7-Eleven",program:"7Rewards",dot:"#00954C",link:"https://www.7-eleven.com",osm:"7-Eleven"},
+ {id:"jimmyjohns",name:"Jimmy John's",program:"Freaky Fast Rewards",dot:"#C8102E",link:"https://www.jimmyjohns.com",osm:"Jimmy John's"},
+ {id:"pizzahut",name:"Pizza Hut",program:"Hut Rewards",dot:"#C8102E",link:"https://www.pizzahut.com",osm:"Pizza Hut"},
+ {id:"subway",name:"Subway",program:"Subway MVP Rewards",dot:"#008C15",link:"https://www.subway.com",osm:"Subway"},
+ {id:"walmart",name:"Walmart",program:"Walmart Cash",dot:"#0071CE",link:"https://www.walmart.com",osm:"Walmart"},
+ {id:"gasbuddy",name:"GasBuddy",program:"Fuel savings",dot:"#A6192E",link:"https://www.gasbuddy.com",osm:""},
+ {id:"papajohns",name:"Papa Johns",program:"Papa Rewards",dot:"#C8102E",link:"https://www.papajohns.com",osm:"Papa John's"},
+ {id:"chipotle",name:"Chipotle",program:"Chipotle Rewards",dot:"#451400",link:"https://www.chipotle.com",osm:"Chipotle"},
+ {id:"jerseymikes",name:"Jersey Mike's",program:"Shore Points",dot:"#1B3A6B",link:"https://www.jerseymikes.com",osm:"Jersey Mike's"},
+ {id:"churchs",name:"Church's",program:"Church's Rewards",dot:"#C9A227",link:"https://www.churchs.com",osm:"Church's Chicken"},
+ {id:"krispykreme",name:"Krispy Kreme",program:"Krispy Kreme Rewards",dot:"#00953B",link:"https://www.krispykreme.com",osm:"Krispy Kreme",bday:"Free dozen original glazed, per older roundups. Verify."}
+];
+
+var EXTRAS = [
+ {name:"Chick-fil-A",link:"https://www.chick-fil-a.com",osm:"Chick-fil-A",bday:"Something sweet — cookie or brownie, varies by tier."},
+ {name:"Panera Bread",link:"https://www.panerabread.com",osm:"Panera Bread",bday:"Free pastry with MyPanera."},
+ {name:"Denny's",link:"https://www.dennys.com",osm:"Denny's",bday:"Free Grand Slam, no purchase needed. Bring ID."},
+ {name:"Firehouse Subs",link:"https://www.firehousesubs.com",osm:"Firehouse Subs",bday:"Free medium sub with any purchase."},
+ {name:"Auntie Anne's",link:"https://www.auntieannes.com",osm:"Auntie Anne's",bday:"Free pretzel. Needs a purchase in the past year."},
+ {name:"Dunkin'",link:"https://www.dunkindonuts.com",osm:"Dunkin'"},
+ {name:"KFC",link:"https://www.kfc.com",osm:"KFC"},
+ {name:"Panda Express",link:"https://www.pandaexpress.com",osm:"Panda Express"},
+ {name:"Sonic Drive-In",link:"https://www.sonicdrivein.com",osm:"Sonic"},
+ {name:"Five Guys",link:"https://www.fiveguys.com",osm:"Five Guys"},
+ {name:"Wingstop",link:"https://www.wingstop.com",osm:"Wingstop"},
+ {name:"Del Taco",link:"https://www.deltaco.com",osm:"Del Taco"},
+ {name:"Raising Cane's",link:"https://www.raisingcanes.com",osm:"Raising Cane's"},
+ {name:"Qdoba",link:"https://www.qdoba.com",osm:"Qdoba"},
+ {name:"Red Robin",link:"https://www.redrobin.com",osm:"Red Robin"},
+ {name:"Applebee's",link:"https://www.applebees.com",osm:"Applebee's"},
+ {name:"Olive Garden",link:"https://www.olivegarden.com",osm:"Olive Garden"},
+ {name:"Buffalo Wild Wings",link:"https://www.buffalowildwings.com",osm:"Buffalo Wild Wings"},
+ {name:"Shake Shack",link:"https://www.shakeshack.com",osm:"Shake Shack"},
+ {name:"Baskin-Robbins",link:"https://www.baskinrobbins.com",osm:"Baskin-Robbins"},
+ {name:"Cold Stone Creamery",link:"https://www.coldstonecreamery.com",osm:"Cold Stone Creamery"},
+ {name:"MOD Pizza",link:"https://modpizza.com",osm:"MOD Pizza"},
+ {name:"Round Table Pizza",link:"https://www.roundtablepizza.com",osm:"Round Table Pizza"},
+ {name:"Taco Time",link:"https://tacotime.com",osm:"Taco Time"},
+ {name:"Jamba",link:"https://www.jamba.com",osm:"Jamba"},
+ {name:"Cinnabon",link:"https://www.cinnabon.com",osm:"Cinnabon"},
+ {name:"Safeway",link:"https://www.safeway.com",osm:"Safeway"},
+ {name:"Fred Meyer",link:"https://www.fredmeyer.com",osm:"Fred Meyer"},
+ {name:"WinCo Foods",link:"https://www.wincofoods.com",osm:"WinCo Foods"},
+ {name:"Costco",link:"https://www.costco.com",osm:"Costco"}
+];
+
+var SEED_BY_ID = {};
+SEED.forEach(function(b){ SEED_BY_ID[b.id] = b; });
+
+/* ============================ storage ============================ */
+var SCHEMA = 3, KEY = "rewards-ledger";
+var LEGACY = ["rewards-ledger-v3","rewards-ledger-v2","rewards-ledger-v1"];
+var USER_FIELDS = ["points","goal","expires","deal","dealEnds","checked","enrolled","bday","link","place","placeError"];
+var EMPTY = {points:null,goal:null,expires:"",deal:"",dealEnds:"",checked:"",enrolled:false,bday:"",place:null,placeError:""};
+var DEFAULT_CFG = {lat:null,lng:null,accuracy:null,scannedAt:"",radius:15,birthday:"08-15"};
+
+function emptyRow(){ return JSON.parse(JSON.stringify(EMPTY)); }
+
+function pickUser(row){
+  var out = {};
+  USER_FIELDS.forEach(function(f){ if (row[f] !== undefined) out[f] = row[f]; });
+  return out;
+}
+function pruneEmpty(o){
+  var out = {};
+  Object.keys(o).forEach(function(k){
+    var v = o[k];
+    if (k in EMPTY && (v === EMPTY[k] || v === undefined || v === "" || v === null)) return;
+    out[k] = v;
+  });
+  return out;
+}
+
+/* Layer saved data over the shipped catalogue. This is what makes updates
+   safe: brands come from the file you're running, numbers come from you. */
+function hydrate(saved){
+  var savedRows = (saved && Array.isArray(saved.rows)) ? saved.rows : [];
+  var byId = {};
+  savedRows.forEach(function(r){ byId[r.id] = r; });
+
+  var rows = SEED.map(function(b){
+    var mine = byId[b.id] || {};
+    var row = emptyRow();
+    Object.keys(b).forEach(function(k){ row[k] = b[k]; });
+    var u = pickUser(mine);
+    Object.keys(u).forEach(function(k){ row[k] = u[k]; });
+    row.bday = (mine.bday !== undefined && mine.bday !== "") ? mine.bday : (b.bday || "");
+    row.link = mine.link || b.link;
+    return row;
+  });
+
+  savedRows.forEach(function(r){
+    if (!r.custom || SEED_BY_ID[r.id]) return;
+    var row = emptyRow();
+    row.id = r.id; row.name = r.name || "Unnamed"; row.program = r.program || "";
+    row.dot = r.dot || "#5A6675"; row.osm = r.osm || r.name || ""; row.custom = true;
+    var u = pickUser(r);
+    Object.keys(u).forEach(function(k){ row[k] = u[k]; });
+    rows.push(row);
+  });
+
+  var cfg = {};
+  Object.keys(DEFAULT_CFG).forEach(function(k){ cfg[k] = DEFAULT_CFG[k]; });
+  if (saved && saved.cfg) Object.keys(saved.cfg).forEach(function(k){ cfg[k] = saved.cfg[k]; });
+
+  return {rows: rows, cfg: cfg};
+}
+
+function dehydrate(st){
+  var rows = [];
+  st.rows.forEach(function(r){
+    var mine = pruneEmpty(pickUser(r));
+    var shipped = SEED_BY_ID[r.id];
+    if (shipped){
+      if (mine.link === shipped.link) delete mine.link;
+      if (mine.bday === (shipped.bday || "")) delete mine.bday;
+    }
+    if (!r.custom && Object.keys(mine).length === 0) return;
+    var base = {id: r.id};
+    Object.keys(mine).forEach(function(k){ base[k] = mine[k]; });
+    if (r.custom){
+      base.custom = true; base.name = r.name; base.osm = r.osm;
+      base.dot = r.dot; base.program = r.program;
+    }
+    rows.push(base);
+  });
+  return {schema: SCHEMA, savedAt: new Date().toISOString(), cfg: st.cfg, rows: rows};
+}
+
+function migrate(d){
+  if (!d) return null;
+  var v = Number(d.schema) || 1;
+  if (v < 2){ d.cfg = d.cfg || {}; v = 2; }
+  if (v < 3){
+    if (d.cfg) delete d.cfg.apiKey;
+    (d.rows || []).forEach(function(r){ if (r.place && r.place.placeId) delete r.place.placeId; });
+    v = 3;
+  }
+  d.schema = SCHEMA;
+  return d;
+}
+
+var storageBroken = false;
+function readRaw(){
+  var keys = [KEY].concat(LEGACY);
+  for (var i = 0; i < keys.length; i++){
+    try {
+      var raw = localStorage.getItem(keys[i]);
+      if (!raw) continue;
+      var p = JSON.parse(raw);
+      return Array.isArray(p) ? {rows: p} : p;
+    } catch (e) { storageBroken = true; }
+  }
+  return null;
+}
+function loadState(){ return hydrate(migrate(readRaw())); }
+function saveState(st){
+  try { localStorage.setItem(KEY, JSON.stringify(dehydrate(st))); return {ok:true}; }
+  catch (e){
+    storageBroken = true;
+    return {ok:false, error: e && e.name === "QuotaExceededError" ? "storage is full" : "this browser is blocking storage"};
+  }
+}
+function exportText(st){
+  var d = dehydrate(st); d.app = "rewards-ledger";
+  return JSON.stringify(d, null, 2);
+}
+function importText(text, current, mode){
+  var parsed;
+  try { parsed = JSON.parse(text); } catch (e){ throw new Error("That file isn't valid JSON."); }
+  if (!parsed || !Array.isArray(parsed.rows)) throw new Error("No rows in that file — is it a rewards ledger export?");
+  if (Number(parsed.schema) > SCHEMA) throw new Error("That export came from a newer version. Update the app first.");
+  var incoming = migrate(parsed);
+  if (mode === "replace") return {state: hydrate(incoming), count: incoming.rows.length};
+  var dry = dehydrate(current), byId = {};
+  dry.rows.forEach(function(r){ byId[r.id] = r; });
+  incoming.rows.forEach(function(r){
+    var merged = byId[r.id] || {};
+    Object.keys(r).forEach(function(k){ merged[k] = r[k]; });
+    byId[r.id] = merged;
+  });
+  var cfg = {};
+  Object.keys(dry.cfg).forEach(function(k){ cfg[k] = dry.cfg[k]; });
+  if (incoming.cfg) Object.keys(incoming.cfg).forEach(function(k){ cfg[k] = incoming.cfg[k]; });
+  return {state: hydrate({schema:SCHEMA, cfg:cfg, rows:Object.keys(byId).map(function(k){return byId[k];})}), count: incoming.rows.length};
+}
+
+/* ============================ scoring ============================ */
+var DAY = 86400000;
+function today(){ var d = new Date(); d.setHours(0,0,0,0); return d; }
+function todayISO(){
+  var d = today();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function daysUntil(iso){
+  if (!iso) return null;
+  var d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return null;
+  return Math.round((d - today()) / DAY);
+}
+var TONE = {loss:"var(--loss)", soon:"var(--soon)", gain:"var(--gain)", mute:"var(--ink30)", quiet:"var(--ink60)"};
+
+function evaluate(b){
+  var pts = Number(b.points) || 0, goal = Number(b.goal) || 0;
+  var ready = goal > 0 && pts >= goal;
+  var dExp = daysUntil(b.expires), dDeal = daysUntil(b.dealEnds);
+  var dealLive = b.deal && (dDeal === null || dDeal >= 0);
+  var stale = b.checked ? Math.abs(daysUntil(b.checked)) : null;
+  var s = function(n){ return n === 1 ? "" : "s"; };
+
+  if (ready && dExp !== null && dExp >= 0 && dExp <= 21)
+    return {score:1000-dExp, tone:TONE.loss, tag:"Free food, gone in "+dExp+"d",
+      why:"You've earned a reward and the points behind it expire in "+dExp+" day"+s(dExp)+"."};
+  if (!ready && pts > 0 && dExp !== null && dExp >= 0 && dExp <= 30)
+    return {score:800-dExp, tone:TONE.loss, tag:pts+" pts expire in "+dExp+"d",
+      why:pts+" points vanish in "+dExp+" day"+s(dExp)+". One order usually resets the clock."};
+  if (ready)
+    return {score:600+Math.min(pts,99), tone:TONE.gain, tag:"Reward ready",
+      why:"You have enough points to redeem something right now."};
+  if (dealLive && dDeal !== null && dDeal <= 10)
+    return {score:400-dDeal, tone:TONE.soon, tag:"Deal ends in "+dDeal+"d", why:b.deal};
+  if (goal > 0 && pts/goal >= 0.75)
+    return {score:200+(pts/goal)*50, tone:TONE.soon, tag:(goal-pts)+" pts short",
+      why:"You're "+(goal-pts)+" points from a reward. One more visit does it."};
+  if (dealLive) return {score:150, tone:TONE.soon, tag:"Deal saved", why:b.deal};
+  if (!b.checked) return {score:100, tone:TONE.mute, tag:"Not checked yet",
+      why:"Open the app once and write down what's in there."};
+  if (stale !== null && stale > 45) return {score:90, tone:TONE.mute, tag:"Checked "+stale+"d ago",
+      why:"Worth a look — balances and offers move."};
+  if (pts > 0) return {score:50, tone:TONE.quiet, tag:pts+" pts", why:"Banking points, nothing urgent."};
+  return {score:0, tone:TONE.mute, tag:"Empty", why:"No points logged."};
+}
+
+function birthdayClock(birthday){
+  var now = today();
+  var parts = String(birthday || "").split("-").map(Number);
+  var m = parts[0], d = parts[1];
+  if (!m || !d || m < 1 || m > 12 || d < 1 || d > 31){ m = 8; d = 15; }
+  var next = new Date(now.getFullYear(), m-1, d);
+  if (next < now) next = new Date(now.getFullYear()+1, m-1, d);
+  var prev = new Date(next.getFullYear()-1, m-1, d);
+  var total = Math.round((next - prev)/DAY), gone = Math.round((now - prev)/DAY);
+  return {next:next, daysLeft:Math.round((next-now)/DAY), progress:Math.min(1,Math.max(0,gone/total)), total:total};
+}
+
+/* ============================ geo ============================ */
+var OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter"
+];
+function milesBetween(a,b){
+  var R = 3958.8, rad = Math.PI/180;
+  var dLat = (b.lat-a.lat)*rad, dLng = (b.lng-a.lng)*rad;
+  var h = Math.pow(Math.sin(dLat/2),2) + Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.pow(Math.sin(dLng/2),2);
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+function distanceOf(row, origin){ return (row.place && origin) ? milesBetween(origin, row.place) : null; }
+function fmtMi(mi){ return mi == null ? null : (mi < 10 ? mi.toFixed(1)+" mi" : Math.round(mi)+" mi"); }
+function mapsUrl(p){ return "https://www.google.com/maps/search/?api=1&query="+p.lat+","+p.lng; }
+
+function currentPosition(){
+  return new Promise(function(resolve, reject){
+    if (!navigator.geolocation){ reject(new Error("This browser has no location API.")); return; }
+    if (!window.isSecureContext){
+      reject(new Error("Location needs a secure page (https or localhost). Type a town below instead."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(p){ resolve({lat:p.coords.latitude, lng:p.coords.longitude, accuracy:Math.round(p.coords.accuracy)}); },
+      function(err){ reject(new Error(err.code === 1
+        ? "Location permission was denied. Allow precise location, or type a town below."
+        : "Couldn't get a fix. Try again outdoors, or type a town below.")); },
+      {enableHighAccuracy:true, timeout:15000, maximumAge:0}
+    );
+  });
+}
+function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function overpassScan(rows, origin, radiusMi, onStatus){
+  var targets = rows.filter(function(r){ return r.osm; });
+  if (!targets.length) return Promise.resolve({});
+  var pattern = targets.map(function(r){ return escapeRe(r.osm); }).join("|");
+  var radius = Math.round(radiusMi * 1609.34);
+  var q = '[out:json][timeout:90];\n(\n  nwr["name"~"'+pattern+'",i](around:'+radius+','+origin.lat+','+origin.lng+');\n'
+        + '  nwr["brand"~"'+pattern+'",i](around:'+radius+','+origin.lat+','+origin.lng+');\n);\nout center tags;';
+
+  var i = 0;
+  function attempt(){
+    if (i >= OVERPASS.length) return Promise.reject(new Error("Every Overpass mirror refused the request."));
+    var url = OVERPASS[i++];
+    onStatus("Asking " + url.split("/")[2] + "…");
+    return fetch(url, {
+      method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:"data=" + encodeURIComponent(q)
+    }).then(function(res){
+      if (!res.ok) throw new Error("server returned " + res.status);
+      return res.json();
+    }).catch(function(){ return attempt(); });
+  }
+
+  return attempt().then(function(data){
+    var els = data.elements || [];
+    onStatus("Matching " + els.length + " places…");
+    var best = {};
+    els.forEach(function(el){
+      var lat = el.lat != null ? el.lat : (el.center && el.center.lat);
+      var lng = el.lon != null ? el.lon : (el.center && el.center.lon);
+      if (lat == null || lng == null) return;
+      var tags = el.tags || {};
+      var label = ((tags.brand || "") + " " + (tags.name || "")).toLowerCase();
+      targets.forEach(function(r){
+        if (label.indexOf(r.osm.toLowerCase()) === -1) return;
+        var mi = milesBetween(origin, {lat:lat, lng:lng});
+        if (best[r.id] && best[r.id].mi <= mi) return;
+        var street = [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ");
+        best[r.id] = {mi:mi, place:{
+          placeName: tags.name || r.name,
+          address: [street, tags["addr:city"]].filter(Boolean).join(", ") || "address not in OSM",
+          lat:lat, lng:lng
+        }};
+      });
+    });
+    return best;
+  });
+}
+
+function geocode(text){
+  return fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(text),
+    {headers:{Accept:"application/json"}})
+    .then(function(res){ if (!res.ok) throw new Error("Place lookup failed."); return res.json(); })
+    .then(function(j){
+      if (!j.length) throw new Error("Couldn't find that place.");
+      return {lat:parseFloat(j[0].lat), lng:parseFloat(j[0].lon), accuracy:null};
+    });
+}
+
+/* ============================ app state ============================ */
+var state = null;
+var ui = {tab:"ledger", view:"urgent", editing:null, sheet:null, scan:{running:false,status:"",error:""},
+          importMode:"merge", dataMsg:"", dataErr:"", addChoice:""};
+var toastTimer = null;
+
+function esc(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function flash(msg){
+  var el = document.getElementById("toast");
+  el.innerHTML = '<div class="toast">' + esc(msg) + '</div>';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ el.innerHTML = ""; }, 2400);
+}
+function commit(next){
+  state = next;
+  var res = saveState(state);
+  flash(res.ok ? "Saved" : "Not saved — " + res.error);
+  render();
+}
+function patchCfg(patch){
+  var cfg = {};
+  Object.keys(state.cfg).forEach(function(k){ cfg[k] = state.cfg[k]; });
+  Object.keys(patch).forEach(function(k){ cfg[k] = patch[k]; });
+  commit({rows: state.rows, cfg: cfg});
+}
+function patchRows(rows){ commit({rows: rows, cfg: state.cfg}); }
+function rowById(id){
+  for (var i=0;i<state.rows.length;i++) if (state.rows[i].id === id) return state.rows[i];
+  return null;
+}
+function originOf(){ return state.cfg.lat != null ? {lat:state.cfg.lat, lng:state.cfg.lng} : null; }
+
+function scoredRows(){
+  var origin = originOf();
+  var list = state.rows.map(function(r){
+    var copy = {};
+    Object.keys(r).forEach(function(k){ copy[k] = r[k]; });
+    copy.ev = evaluate(r);
+    copy.mi = distanceOf(r, origin);
+    return copy;
+  });
+  if (ui.view === "az") return list.sort(function(a,b){ return a.name.localeCompare(b.name); });
+  if (ui.view === "near") return list.sort(function(a,b){
+    if (a.mi == null && b.mi == null) return b.ev.score - a.ev.score;
+    if (a.mi == null) return 1;
+    if (b.mi == null) return -1;
+    return a.mi - b.mi;
+  });
+  return list.sort(function(a,b){
+    var gap = b.ev.score - a.ev.score;
+    if (Math.abs(gap) > 25 || a.mi == null || b.mi == null) return gap;
+    return a.mi - b.mi;
+  });
+}
+
+/* ============================ actions ============================ */
+function rescan(){
+  ui.scan = {running:true, status:"Finding you…", error:""};
+  renderSheet();
+  var origin = state.cfg.lat != null
+    ? Promise.resolve({lat:state.cfg.lat, lng:state.cfg.lng, accuracy:state.cfg.accuracy})
+    : currentPosition();
+
+  origin.then(function(o){
+    return overpassScan(state.rows, o, state.cfg.radius, function(s){
+      ui.scan.status = s; renderSheet();
+    }).then(function(best){
+      var rows = state.rows.map(function(r){
+        if (!r.osm) return r;
+        var copy = {};
+        Object.keys(r).forEach(function(k){ copy[k] = r[k]; });
+        if (best[r.id]){ copy.place = best[r.id].place; copy.placeError = ""; }
+        else { copy.place = null; copy.placeError = "Nothing within " + state.cfg.radius + " mi in OpenStreetMap"; }
+        return copy;
+      });
+      var cfg = {};
+      Object.keys(state.cfg).forEach(function(k){ cfg[k] = state.cfg[k]; });
+      cfg.lat = o.lat; cfg.lng = o.lng; cfg.accuracy = o.accuracy; cfg.scannedAt = new Date().toISOString();
+      ui.scan = {running:false, status:"", error:""};
+      commit({rows: rows, cfg: cfg});
+      flash("Found " + Object.keys(best).length + " nearby");
+    });
+  }).catch(function(e){
+    ui.scan = {running:false, status:"", error: e.message};
+    renderSheet();
+  });
+}
+
+function addRestaurant(entry){
+  var id = "custom-" + entry.name.toLowerCase().replace(/[^a-z0-9]+/g,"-") + "-" + Date.now().toString(36);
+  var row = emptyRow();
+  row.id = id; row.name = entry.name; row.link = entry.link || "";
+  row.osm = entry.osm || entry.name; row.bday = entry.bday || "";
+  row.custom = true; row.dot = "#5A6675"; row.program = "";
+  ui.addChoice = "";
+  patchRows(state.rows.concat([row]));
+  flash(entry.name + " added");
+}
+
+/* ============================ rendering ============================ */
+function render(){
+  var origin = originOf();
+  var list = scoredRows();
+  var pick = (list.length && list[0].ev.score >= 150) ? list[0] : null;
+  var backups = list.filter(function(r){ return r !== pick && r.ev.score >= 150; }).slice(0,2);
+  var atRisk = list.filter(function(r){ return r.ev.score >= 800; }).length;
+  var shown = ui.view === "ready" ? list.filter(function(r){ return r.ev.score >= 400; }) : list;
+
+  var h = '<div class="shell">';
+  h += '<header class="head"><div><h1>Rewards ledger</h1><p class="sub">'
+    + (atRisk > 0 ? atRisk + " account" + (atRisk===1?" has":"s have") + " points about to expire."
+                  : "Nothing expiring right now. Keep it that way.")
+    + '</p></div><button class="btn btn-ghost btn-small" data-act="settings">Settings</button></header>';
+
+  if (storageBroken)
+    h += '<div class="warn">This browser isn\'t letting the app save. Your numbers will vanish when you close it — check that site data isn\'t blocked for this page.</div>';
+
+  h += '<nav class="tabs">'
+    + tabBtn("ledger","Points", ui.tab) + tabBtn("birthday","Birthday", ui.tab) + '</nav>';
+
+  if (ui.tab === "ledger"){
+    if (pick){
+      h += '<section class="card pick" style="border-left-color:'+pick.ev.tone+'">'
+        + '<p class="pick-label">Eat here next</p>'
+        + '<p class="pick-name">'+esc(pick.name)+'</p>'
+        + '<p class="pick-why">'+esc(pick.ev.why)+'</p>'
+        + (pick.place ? '<p class="pick-where">'+esc(fmtMi(pick.mi))+' away — '+esc(pick.place.address)+'</p>' : '')
+        + '<div class="pick-actions">'
+        + '<a class="btn btn-solid" href="'+esc(pick.link||"#")+'" target="_blank" rel="noopener noreferrer">Open app</a>'
+        + (pick.place ? '<a class="btn btn-ghost" href="'+esc(mapsUrl(pick.place))+'" target="_blank" rel="noopener noreferrer">Directions</a>' : '')
+        + '</div>'
+        + '<button class="btn-quiet" data-act="edit" data-id="'+esc(pick.id)+'">Update balance</button>'
+        + '</section>';
+    } else {
+      h += '<section class="card"><b>Start with three apps</b><p class="sub">Tap a brand, open its app, '
+        + 'then copy in your balance and the expiration date from the rewards terms.</p></section>';
+    }
+
+    if (backups.length){
+      h += '<div class="backups">';
+      backups.forEach(function(b){
+        h += '<button class="backup" data-act="edit" data-id="'+esc(b.id)+'"><b>'+esc(b.name)+'</b>'
+          + '<span style="color:'+b.ev.tone+'">'+esc(b.ev.tag)+'</span>'
+          + (b.mi != null ? '<span style="color:var(--ink30)">'+esc(fmtMi(b.mi))+'</span>' : '')
+          + '</button>';
+      });
+      h += '</div>';
+    }
+
+    h += '<nav class="filters">' + filterBtn("urgent","By urgency") + filterBtn("ready","Worth using")
+       + filterBtn("near","Nearby") + filterBtn("az","A–Z") + '</nav>';
+
+    if (ui.view === "near" && !origin)
+      h += '<p class="sub" style="padding:1rem 0">No location yet. Open settings and scan once — it\'s free and takes a few seconds.</p>';
+
+    h += '<ul class="list">';
+    shown.forEach(function(r){
+      var pts = Number(r.points) || 0, goal = Number(r.goal) || 0;
+      h += '<li class="row">'
+        + '<a class="dot" style="background:'+esc(r.dot)+'" href="'+esc(r.link||"#")+'" target="_blank" rel="noopener noreferrer" aria-label="Open '+esc(r.name)+'"></a>'
+        + '<button class="row-main" data-act="edit" data-id="'+esc(r.id)+'">'
+        + '<span class="row-name">'+esc(r.name)+'</span>'
+        + '<span class="row-meta"><span style="color:'+r.ev.tone+'">'+esc(r.ev.tag)+'</span>'
+        + (r.mi != null ? '<span style="color:var(--ink30)">'+esc(fmtMi(r.mi))+'</span>' : '')
+        + '</span></button>'
+        + '<button class="row-num num" data-act="edit" data-id="'+esc(r.id)+'">'
+        + '<b style="color:'+(pts?"var(--ink)":"var(--ink30)")+'">'+(pts||"—")+'</b>'
+        + (goal > 0 ? '<span>of '+goal+'</span>' : '')
+        + '</button></li>';
+    });
+    h += '</ul>';
+
+    h += addBlock();
+    h += '<p class="note">Nearby locations come from OpenStreetMap — no key, no account, no bill. '
+      + 'Coverage depends on what volunteers have mapped, so a miss means unmapped, not absent.</p>';
+  } else {
+    h += birthdayTab(origin);
+  }
+
+  h += '</div>';
+  document.getElementById("app").innerHTML = h;
+  renderSheet();
+}
+
+function tabBtn(k,label,current){
+  return '<button class="tab'+(current===k?" on":"")+'" data-act="tab" data-v="'+k+'">'+label+'</button>';
+}
+function filterBtn(k,label){
+  return '<button class="tab'+(ui.view===k?" on":"")+'" data-act="view" data-v="'+k+'">'+label+'</button>';
+}
+
+function addBlock(){
+  var taken = {};
+  state.rows.forEach(function(r){ taken[r.name.toLowerCase()] = true; });
+  var avail = EXTRAS.filter(function(e){ return !taken[e.name.toLowerCase()]; });
+  var h = '<div class="card" style="margin-top:1.25rem"><b>Add a place</b>'
+    + '<select class="select" data-act="add-choice"><option value="">Pick a chain…</option>';
+  avail.forEach(function(e){
+    h += '<option value="'+esc(e.name)+'"'+(ui.addChoice===e.name?" selected":"")+'>'+esc(e.name)+'</option>';
+  });
+  h += '<option value="__other"'+(ui.addChoice==="__other"?" selected":"")+'>Something else…</option></select>';
+  if (ui.addChoice === "__other"){
+    h += '<div class="stack" style="margin-top:.75rem">'
+      + '<input class="select" id="custom-name" type="text" placeholder="Name">'
+      + '<input class="select" id="custom-link" type="url" placeholder="Link (optional)"></div>';
+  }
+  if (ui.addChoice) h += '<button class="btn btn-solid" style="margin-top:.75rem" data-act="add-go">Add to ledger</button>';
+  return h + '</div>';
+}
+
+function birthdayTab(origin){
+  var clock = birthdayClock(state.cfg.birthday);
+  var known = state.rows.filter(function(r){ return r.bday; });
+  var unknown = state.rows.filter(function(r){ return !r.bday; });
+  var signed = state.rows.filter(function(r){ return r.enrolled; }).length;
+  var slack = clock.daysLeft - 30;
+
+  var h = '<section class="card">'
+    + '<p class="bday-count num">'+clock.daysLeft+' days</p>'
+    + '<p class="sub">until '+esc(clock.next.toLocaleDateString(undefined,{month:"long",day:"numeric"}))+'</p>'
+    + '<div class="bar"><div class="bar-fill" style="width:'+(clock.progress*100)+'%"></div>'
+    + '<div class="bar-mark" style="left:'+(((clock.total-30)/clock.total)*100)+'%"></div></div>'
+    + '<p class="sub" style="margin-top:.75rem">'
+    + (slack > 0
+        ? "The marker is 30 days out — that's when enrolling stops being optional. You have "+slack+" days of slack."
+        : "You're inside the enrollment window. Anything you haven't joined yet may not pay out this year.")
+    + '</p><p class="sub">Signed up at '+signed+' of '+state.rows.length+'.</p></section>';
+
+  h += '<p class="sub" style="margin-top:1.5rem">Almost every program wants you enrolled ahead of time — a week '
+    + 'at minimum, sometimes a month — and some want a purchase on file first. Signing up is the whole job; '
+    + 'the free food takes care of itself.</p>';
+
+  if (known.length){
+    h += '<h2 class="section">Known perks</h2><ul class="list">';
+    known.forEach(function(r){ h += bdayRow(r, origin); });
+    h += '</ul>';
+  }
+  h += '<h2 class="section">Need checking</h2>'
+    + '<p class="sub">Open each one, look for a birthday field in your profile, and write down what it promises.</p>'
+    + '<ul class="list">';
+  unknown.forEach(function(r){ h += bdayRow(r, origin); });
+  h += '</ul><p class="note">Seeded perks come from public 2026 roundups and vary by franchise. Treat them as a '
+    + 'starting point and overwrite each one with what your app actually says.</p>';
+  return h;
+}
+
+function bdayRow(r, origin){
+  var mi = distanceOf(r, origin);
+  return '<li class="bday-row">'
+    + '<button class="check'+(r.enrolled?" on":"")+'" data-act="toggle" data-id="'+esc(r.id)+'" '
+    + 'aria-pressed="'+(r.enrolled?"true":"false")+'" aria-label="Signed up at '+esc(r.name)+'">'
+    + (r.enrolled ? "✓" : "") + '</button>'
+    + '<button class="row-main" data-act="edit" data-id="'+esc(r.id)+'">'
+    + '<span class="row-name">'+esc(r.name)+'</span>'
+    + '<span class="bday-perk" style="color:'+(r.bday?"var(--ink60)":"var(--ink30)")+'">'
+    + esc(r.bday || "Not looked up yet")+'</span>'
+    + (mi != null ? '<span class="row-meta" style="color:var(--ink30)">'+esc(fmtMi(mi))+'</span>' : '')
+    + '</button>'
+    + '<a href="'+esc(r.link||"#")+'" target="_blank" rel="noopener noreferrer" style="font-size:.875rem;color:var(--ink60)">Open</a>'
+    + '</li>';
+}
+
+/* ---------------- sheets ---------------- */
+function renderSheet(){
+  var el = document.getElementById("sheet");
+  if (ui.editing) el.innerHTML = editSheet(rowById(ui.editing));
+  else if (ui.sheet === "settings") el.innerHTML = settingsSheet();
+  else if (ui.sheet === "data") el.innerHTML = dataSheet();
+  else { el.innerHTML = ""; }
+}
+function sheetShell(title, subtitle, body){
+  return '<div class="sheet-wrap" role="dialog" aria-modal="true"><div class="scrim" data-act="close"></div>'
+    + '<div class="sheet"><div class="sheet-head"><div><h2>'+esc(title)+'</h2>'
+    + (subtitle ? '<p>'+esc(subtitle)+'</p>' : '')
+    + '</div><button class="close" data-act="close" aria-label="Close">×</button></div>'
+    + body + '</div></div>';
+}
+
+function editSheet(r){
+  if (!r) return "";
+  var origin = originOf(), mi = distanceOf(r, origin);
+  var ready = Number(r.goal) > 0 && Number(r.points) >= Number(r.goal);
+  var b = "";
+  if (r.link) b += '<a class="btn btn-solid" style="margin-top:1rem" href="'+esc(r.link)+'" target="_blank" rel="noopener noreferrer">Open '+esc(r.name)+'</a>';
+  if (r.place) b += '<div class="place-chip"><b>'+esc(fmtMi(mi))+' — '+esc(r.place.address)+'</b>'
+    + '<a href="'+esc(mapsUrl(r.place))+'" target="_blank" rel="noopener noreferrer">Directions</a></div>';
+  else if (r.placeError) b += '<p class="note" style="margin-top:.75rem">'+esc(r.placeError)+'</p>';
+
+  b += '<div class="pair"><label class="field">Points now'
+    + '<input id="f-points" type="number" inputmode="numeric" value="'+esc(r.points == null ? "" : r.points)+'" placeholder="0"></label>'
+    + '<label class="field">Points for a reward'
+    + '<input id="f-goal" type="number" inputmode="numeric" value="'+esc(r.goal == null ? "" : r.goal)+'" placeholder="0"></label></div>'
+    + '<label class="field">Points expire on<input id="f-expires" type="date" value="'+esc(r.expires)+'"></label>'
+    + '<label class="field">Birthday perk<input id="f-bday" type="text" value="'+esc(r.bday)+'" placeholder="Free shake, week of"></label>'
+    + '<label class="field">Offer you want to use<input id="f-deal" type="text" value="'+esc(r.deal)+'" placeholder="Free fries with any purchase"></label>'
+    + '<label class="field">Offer ends<input id="f-dealEnds" type="date" value="'+esc(r.dealEnds)+'"></label>'
+    + '<label class="field">Link this brand opens<input id="f-link" type="url" value="'+esc(r.link)+'" placeholder="https://"></label>'
+    + '<button class="btn btn-solid" style="margin-top:1.5rem" data-act="save-row" data-id="'+esc(r.id)+'">Save</button>';
+  if (ready) b += '<button class="btn btn-go" style="margin-top:.75rem" data-act="redeem" data-id="'+esc(r.id)+'">I redeemed it — subtract '+Number(r.goal)+' points</button>';
+  if (r.custom) b += '<button class="btn btn-danger" style="margin-top:.75rem" data-act="delete-row" data-id="'+esc(r.id)+'">Remove '+esc(r.name)+'</button>';
+  if (r.checked) b += '<p class="note" style="text-align:center;margin-top:1rem">Last updated '+esc(r.checked)+'</p>';
+  return sheetShell(r.name, r.program || "Added by you", b);
+}
+
+function settingsSheet(){
+  var cfg = state.cfg;
+  var resolved = state.rows.filter(function(r){ return r.place; }).length;
+  var b = '<h3 class="section" style="margin-top:1.25rem">Where you are</h3><p class="sub">'
+    + (cfg.lat != null
+        ? cfg.lat.toFixed(4)+", "+cfg.lng.toFixed(4)+(cfg.accuracy ? " — accurate to about "+cfg.accuracy+" m" : "")
+        : "Not set yet.")
+    + '</p>';
+  if (!window.isSecureContext)
+    b += '<div class="warn">This page isn\'t running over https, so the browser won\'t hand over your location. '
+      + 'Type a town below instead — everything else works.</div>';
+  b += '<button class="btn btn-ghost" style="margin-top:.75rem" data-act="locate">Use my current location</button>'
+    + '<label class="field">Or name a town or ZIP<input id="f-where" type="text" placeholder="Silverdale, WA"></label>'
+    + '<button class="btn btn-ghost btn-small" style="margin-top:.5rem" data-act="geocode">Look it up</button>'
+    + '<hr class="divider"><h3 class="section" style="margin-top:0">Search radius</h3><div class="seg">';
+  [5,10,15,25].forEach(function(r){
+    b += '<button class="'+(cfg.radius===r?"on":"")+'" data-act="radius" data-v="'+r+'">'+r+' mi</button>';
+  });
+  b += '</div><button class="btn btn-solid" style="margin-top:1rem" data-act="rescan"'+(ui.scan.running?" disabled":"")+'>'
+    + esc(ui.scan.running ? (ui.scan.status || "Scanning…") : "Rescan nearest restaurants") + '</button>'
+    + '<p class="sub" style="margin-top:.5rem">'
+    + (cfg.scannedAt
+        ? resolved+" of "+state.rows.length+" found. Last scanned "+esc(new Date(cfg.scannedAt).toLocaleString())+"."
+        : "Never scanned. One request covers every brand at once.")
+    + '</p>';
+  if (ui.scan.error) b += '<p class="error">'+esc(ui.scan.error)+'</p>';
+  b += '<hr class="divider"><h3 class="section" style="margin-top:0">Your birthday</h3>'
+    + '<label class="field">Month and day<input id="f-birthday" type="text" value="'+esc(cfg.birthday)+'" placeholder="08-15"></label>'
+    + '<button class="btn btn-ghost btn-small" style="margin-top:.5rem" data-act="save-birthday">Save birthday</button>'
+    + '<hr class="divider"><button class="btn btn-ghost" data-act="data">Backup and restore</button>'
+    + '<p class="note">Nearby locations come from OpenStreetMap through the public Overpass mirrors, and town '
+    + 'lookup from Nominatim. Both are volunteer-run and free — scan when you move, not on a timer.</p>';
+  return sheetShell("Settings", null, b);
+}
+
+function dataSheet(){
+  var withData = state.rows.filter(function(r){ return r.checked; }).length;
+  var b = '<h3 class="section" style="margin-top:1.25rem">Export</h3>'
+    + '<p class="sub">'+withData+' row'+(withData===1?"":"s")+' with data. Export before you replace the app file — '
+    + 'your numbers survive updates, but cleared browser storage is gone for good.</p>'
+    + '<div class="pair" style="margin-top:.75rem">'
+    + '<button class="btn btn-solid" data-act="export-file">Download</button>'
+    + '<button class="btn btn-ghost" data-act="export-copy">Copy</button></div>'
+    + '<hr class="divider"><h3 class="section" style="margin-top:0">Import</h3><div class="seg">'
+    + '<button class="'+(ui.importMode==="merge"?"on":"")+'" data-act="mode" data-v="merge">Merge</button>'
+    + '<button class="'+(ui.importMode==="replace"?"on":"")+'" data-act="mode" data-v="replace">Replace</button></div>'
+    + '<p class="sub" style="margin-top:.5rem">'
+    + (ui.importMode === "merge"
+        ? "Rows in the file overwrite matching rows here. Anything the file doesn't mention is left alone."
+        : "Everything here is thrown away and rebuilt from the file.")
+    + '</p>'
+    + '<button class="btn btn-ghost" style="margin-top:.75rem" data-act="pick-file">Choose a file</button>'
+    + '<input id="f-file" type="file" accept="application/json,.json" hidden>'
+    + '<label class="field">Or paste an export<textarea id="f-paste" rows="4" placeholder="{&quot;schema&quot;:3,...}"></textarea></label>'
+    + '<button class="btn btn-ghost btn-small" style="margin-top:.5rem" data-act="import-paste">Import pasted text</button>';
+  if (ui.dataMsg) b += '<p class="sub" style="margin-top:.75rem;color:var(--gain)">'+esc(ui.dataMsg)+'</p>';
+  if (ui.dataErr) b += '<p class="error">'+esc(ui.dataErr)+'</p>';
+  b += '<hr class="divider"><button class="btn btn-danger" data-act="wipe">Erase everything on this device</button>'
+    + '<p class="note">Exports carry only what you typed, never the brand list. Import an old backup into a newer '
+    + 'copy of the app and your numbers land in the right rows even if brands changed in between.</p>';
+  return sheetShell("Backup and restore", "Plain JSON, yours to keep", b);
+}
+
+/* ============================ events ============================ */
+function val(id){ var el = document.getElementById(id); return el ? el.value : ""; }
+
+function applyImport(text){
+  ui.dataErr = ""; ui.dataMsg = "";
+  try {
+    var r = importText(text, state, ui.importMode);
+    ui.dataMsg = "Imported " + r.count + " row" + (r.count===1?"":"s") + ".";
+    commit(r.state);
+  } catch (e){
+    ui.dataErr = e.message;
+    renderSheet();
+  }
+}
+
+document.addEventListener("click", function(ev){
+  var t = ev.target.closest("[data-act]");
+  if (!t) return;
+  var act = t.getAttribute("data-act");
+  var id = t.getAttribute("data-id");
+  var v = t.getAttribute("data-v");
+
+  if (act === "tab"){ ui.tab = v; render(); }
+  else if (act === "view"){ ui.view = v; render(); }
+  else if (act === "edit"){ ui.editing = id; ui.sheet = null; renderSheet(); }
+  else if (act === "close"){ ui.editing = null; ui.sheet = null; ui.dataMsg = ""; ui.dataErr = ""; renderSheet(); }
+  else if (act === "settings"){ ui.sheet = "settings"; ui.editing = null; renderSheet(); }
+  else if (act === "data"){ ui.sheet = "data"; renderSheet(); }
+  else if (act === "toggle"){
+    patchRows(state.rows.map(function(r){
+      if (r.id !== id) return r;
+      var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
+      c.enrolled = !c.enrolled; return c;
+    }));
+  }
+  else if (act === "save-row" || act === "redeem"){
+    var pts = val("f-points") === "" ? null : Number(val("f-points"));
+    var goal = val("f-goal") === "" ? null : Number(val("f-goal"));
+    patchRows(state.rows.map(function(r){
+      if (r.id !== id) return r;
+      var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
+      c.points = pts; c.goal = goal;
+      c.expires = val("f-expires"); c.bday = val("f-bday");
+      c.deal = val("f-deal"); c.dealEnds = val("f-dealEnds"); c.link = val("f-link");
+      c.checked = todayISO();
+      if (act === "redeem"){
+        c.points = Math.max(0, (Number(pts)||0) - (Number(goal)||0));
+        c.deal = ""; c.dealEnds = "";
+      }
+      return c;
+    }));
+    ui.editing = null; renderSheet();
+  }
+  else if (act === "delete-row"){
+    patchRows(state.rows.filter(function(r){ return r.id !== id; }));
+    ui.editing = null; renderSheet();
+  }
+  else if (act === "radius"){ patchCfg({radius: Number(v)}); }
+  else if (act === "save-birthday"){ patchCfg({birthday: val("f-birthday")}); }
+  else if (act === "locate"){
+    currentPosition().then(function(loc){ ui.scan.error = ""; patchCfg(loc); })
+      .catch(function(e){ ui.scan.error = e.message; renderSheet(); });
+  }
+  else if (act === "geocode"){
+    var q = val("f-where").trim();
+    if (!q) return;
+    geocode(q).then(function(loc){ ui.scan.error = ""; patchCfg(loc); })
+      .catch(function(e){ ui.scan.error = e.message; renderSheet(); });
+  }
+  else if (act === "rescan"){ rescan(); }
+  else if (act === "add-go"){
+    if (ui.addChoice === "__other"){
+      var name = val("custom-name").trim();
+      if (!name) return;
+      addRestaurant({name:name, link: val("custom-link").trim(), osm:name, bday:""});
+    } else {
+      for (var i=0;i<EXTRAS.length;i++) if (EXTRAS[i].name === ui.addChoice){ addRestaurant(EXTRAS[i]); return; }
+    }
+  }
+  else if (act === "mode"){ ui.importMode = v; renderSheet(); }
+  else if (act === "export-file"){
+    var blob = new Blob([exportText(state)], {type:"application/json"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "rewards-ledger-" + todayISO() + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+  else if (act === "export-copy"){
+    var text = exportText(state);
+    var done = function(){ ui.dataMsg = "Copied to clipboard."; ui.dataErr = ""; renderSheet(); };
+    if (navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(done).catch(function(){
+        ui.dataErr = "Clipboard blocked — use the download instead."; renderSheet();
+      });
+    } else {
+      ui.dataErr = "Clipboard needs https — use the download instead."; renderSheet();
+    }
+  }
+  else if (act === "pick-file"){ var f = document.getElementById("f-file"); if (f) f.click(); }
+  else if (act === "import-paste"){
+    var p = val("f-paste").trim();
+    if (p) applyImport(p);
+  }
+  else if (act === "wipe"){
+    if (confirm("Erase every balance, date and checkbox on this device? Export first if you're not sure.")){
+      [KEY].concat(LEGACY).forEach(function(k){ try { localStorage.removeItem(k); } catch(e){} });
+      state = hydrate(null);
+      ui.sheet = null; ui.editing = null;
+      render(); flash("Erased");
+    }
+  }
+});
+
+document.addEventListener("change", function(ev){
+  var t = ev.target;
+  if (t.getAttribute && t.getAttribute("data-act") === "add-choice"){
+    ui.addChoice = t.value; render();
+  } else if (t.id === "f-file"){
+    var file = t.files && t.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){ applyImport(String(reader.result)); };
+    reader.onerror = function(){ ui.dataErr = "Couldn't read that file."; renderSheet(); };
+    reader.readAsText(file);
+    t.value = "";
+  }
+});
+
+/* ============================ boot ============================ */
+state = loadState();
+render();
+
+if ("serviceWorker" in navigator && window.isSecureContext){
+  window.addEventListener("load", function(){
+    navigator.serviceWorker.register(new URL("sw.js", document.baseURI).href).catch(function(){});
+  });
+}
+</script>
+</body>
+</html>
