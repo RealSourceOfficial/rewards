@@ -171,10 +171,10 @@ var SEED_BY_ID = {};
 SEED.forEach(function(b){ SEED_BY_ID[b.id] = b; });
 
 /* ============================ storage ============================ */
-var SCHEMA = 3, KEY = "rewards-ledger";
+var SCHEMA = 4, KEY = "rewards-ledger";
 var LEGACY = ["rewards-ledger-v3","rewards-ledger-v2","rewards-ledger-v1"];
-var USER_FIELDS = ["points","goal","expires","deal","dealEnds","checked","enrolled","bday","link","place","placeError"];
-var EMPTY = {points:null,goal:null,expires:"",deal:"",dealEnds:"",checked:"",enrolled:false,bday:"",place:null,placeError:""};
+var USER_FIELDS = ["points","goal","expires","deals","checked","enrolled","bday","link","place","placeError"];
+var EMPTY = {points:null,goal:null,expires:"",deals:[],checked:"",enrolled:false,bday:"",place:null,placeError:""};
 var DEFAULT_CFG = {lat:null,lng:null,accuracy:null,scannedAt:"",radius:15,birthday:"08-15"};
 
 function emptyRow(){ return JSON.parse(JSON.stringify(EMPTY)); }
@@ -188,10 +188,26 @@ function pruneEmpty(o){
   var out = {};
   Object.keys(o).forEach(function(k){
     var v = o[k];
+    if (Array.isArray(v) && v.length === 0) return;
     if (k in EMPTY && (v === EMPTY[k] || v === undefined || v === "" || v === null)) return;
     out[k] = v;
   });
   return out;
+}
+
+/* Deals are stored newest-relevant-first; the one that decides urgency is the
+   live deal expiring soonest. An undated deal counts as live but never urgent. */
+function liveDeals(row){
+  return (row.deals || []).filter(function(d){
+    var n = daysUntil(d.ends);
+    return n === null || n >= 0;
+  }).sort(function(a,b){
+    var x = daysUntil(a.ends), y = daysUntil(b.ends);
+    if (x === null && y === null) return 0;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return x - y;
+  });
 }
 
 /* Layer saved data over the shipped catalogue. This is what makes updates
@@ -258,6 +274,14 @@ function migrate(d){
     if (d.cfg) delete d.cfg.apiKey;
     (d.rows || []).forEach(function(r){ if (r.place && r.place.placeId) delete r.place.placeId; });
     v = 3;
+  }
+  if (v < 4){
+    // v3 held a single deal per brand; screenshots routinely carry half a dozen.
+    (d.rows || []).forEach(function(r){
+      if (!r.deals && r.deal) r.deals = [{title: r.deal, ends: r.dealEnds || ""}];
+      delete r.deal; delete r.dealEnds;
+    });
+    v = 4;
   }
   d.schema = SCHEMA;
   return d;
@@ -326,8 +350,12 @@ var TONE = {loss:"var(--loss)", soon:"var(--soon)", gain:"var(--gain)", mute:"va
 function evaluate(b){
   var pts = Number(b.points) || 0, goal = Number(b.goal) || 0;
   var ready = goal > 0 && pts >= goal;
-  var dExp = daysUntil(b.expires), dDeal = daysUntil(b.dealEnds);
-  var dealLive = b.deal && (dDeal === null || dDeal >= 0);
+  var dExp = daysUntil(b.expires);
+  var live = liveDeals(b);
+  var top = live[0] || null;
+  var dDeal = top ? daysUntil(top.ends) : null;
+  var dealLive = !!top;
+  var extra = live.length > 1 ? " (+" + (live.length - 1) + " more)" : "";
   var stale = b.checked ? Math.abs(daysUntil(b.checked)) : null;
   var s = function(n){ return n === 1 ? "" : "s"; };
 
@@ -341,11 +369,12 @@ function evaluate(b){
     return {score:600+Math.min(pts,99), tone:TONE.gain, tag:"Reward ready",
       why:"You have enough points to redeem something right now."};
   if (dealLive && dDeal !== null && dDeal <= 10)
-    return {score:400-dDeal, tone:TONE.soon, tag:"Deal ends in "+dDeal+"d", why:b.deal};
+    return {score:400-dDeal, tone:TONE.soon, tag:"Deal ends in "+dDeal+"d", why:top.title + extra};
   if (goal > 0 && pts/goal >= 0.75)
     return {score:200+(pts/goal)*50, tone:TONE.soon, tag:(goal-pts)+" pts short",
       why:"You're "+(goal-pts)+" points from a reward. One more visit does it."};
-  if (dealLive) return {score:150, tone:TONE.soon, tag:"Deal saved", why:b.deal};
+  if (dealLive) return {score:150, tone:TONE.soon,
+    tag: live.length > 1 ? live.length + " deals saved" : "Deal saved", why:top.title + extra};
   if (!b.checked) return {score:100, tone:TONE.mute, tag:"Not checked yet",
       why:"Open the app once and write down what's in there."};
   if (stale !== null && stale > 45) return {score:90, tone:TONE.mute, tag:"Checked "+stale+"d ago",
@@ -459,10 +488,194 @@ function geocode(text){
     });
 }
 
+/* ============================ screenshot reading ============================ */
+/* OCR runs entirely in your browser via tesseract.js, fetched from a CDN the
+   first time you use it. No key, no account, no image ever leaves the phone. */
+var TESSERACT_SRC = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+
+/* Extra words that identify a brand in OCR text, beyond its own name. */
+var BRAND_HINTS = {
+  jackbox: ["jack in the box","jack pack","sourdough jack","breakfast jack"],
+  wendys: ["wendy","wendys","frosty","baconator"],
+  starbucks: ["starbucks","rewards menu","handcrafted drink"],
+  ihop: ["ihop","pancoin","stack market","international bank of pancakes","short stack"],
+  popeyes: ["popeyes","signature chicken","3pc tenders","6pc wings"],
+  mcd: ["mcdonald","mymcdonald","mccafe","big mac"],
+  tacobell: ["taco bell","cantina","crunchwrap"],
+  chipotle: ["chipotle","burrito bowl"],
+  dq: ["dairy queen","blizzard"],
+  bk: ["burger king","royal perks","whopper"],
+  arbys: ["arby","curly fries","beef n cheddar"],
+  subway: ["subway","mvp rewards","footlong"],
+  dominos: ["domino","piece of the pie"],
+  pizzahut: ["pizza hut","hut rewards"],
+  papajohns: ["papa john","papa rewards"],
+  littlecaesars: ["little caesars","hot-n-ready","hot n ready"],
+  jerseymikes: ["jersey mike","shore points"],
+  jimmyjohns: ["jimmy john","freaky fast"],
+  krispykreme: ["krispy kreme","original glazed"],
+  dutch: ["dutch bros","dutch rewards"],
+  "7eleven": ["7-eleven","7 eleven","7rewards","big gulp"],
+  churchs: ["church's","churchs","texas chicken"],
+  carls: ["carl's jr","carls jr","famous star"],
+  walmart: ["walmart","walmart cash"],
+  gasbuddy: ["gasbuddy","gas buddy"]
+};
+
+/* "Expires in 6 days" / "Expires on 09/26" / "Expires 09/28/2026" */
+function parseExpiry(text){
+  var t = String(text || "").toLowerCase();
+
+  var rel = t.match(/expires?\s+in\s+(\d+)\s*days?/);
+  if (rel){
+    var d = today();
+    d.setDate(d.getDate() + Number(rel[1]));
+    return isoOf(d);
+  }
+  if (/expires?\s+(today|tomorrow)/.test(t)){
+    var d2 = today();
+    if (/tomorrow/.test(t)) d2.setDate(d2.getDate() + 1);
+    return isoOf(d2);
+  }
+
+  var abs = t.match(/(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?/);
+  if (!abs) return "";
+  var mo = Number(abs[1]), day = Number(abs[2]);
+  if (mo < 1 || mo > 12 || day < 1 || day > 31) return "";
+  var yr;
+  if (abs[3]){
+    yr = Number(abs[3]);
+    if (yr < 100) yr += 2000;
+  } else {
+    // No year printed: assume the next time that date comes around.
+    var now = today();
+    yr = now.getFullYear();
+    if (new Date(yr, mo - 1, day) < now) yr += 1;
+  }
+  return isoOf(new Date(yr, mo - 1, day));
+}
+function isoOf(d){
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+function detectBrand(text){
+  var t = " " + String(text || "").toLowerCase().replace(/[’']/g, "'") + " ";
+  var best = null, bestLen = 0;
+  SEED.forEach(function(b){
+    var needles = [b.name.toLowerCase()].concat(BRAND_HINTS[b.id] || []);
+    needles.forEach(function(n){
+      if (n && t.indexOf(n.toLowerCase()) !== -1 && n.length > bestLen){
+        best = b.id; bestLen = n.length;
+      }
+    });
+  });
+  return best;
+}
+
+/* Pull balance, cheapest reward threshold and dated offers out of OCR text.
+   Deliberately conservative: a missing field beats a wrong one, because a
+   wrong expiration date sends you driving for a coupon that already died. */
+function parseScreenshot(raw){
+  var text = String(raw || "").replace(/\r/g, "");
+  var lines = text.split("\n").map(function(l){ return l.trim(); }).filter(Boolean);
+  var flat = text.toLowerCase().replace(/[’']/g, "'");
+  var out = {brandId: detectBrand(text), balance: null, threshold: null, deals: []};
+
+  /* ---- current balance ---- */
+  var bal =
+      flat.match(/you\s+have\s+([\d,]+)\s*[\u2605*]/)          // Starbucks: "You have 0★"
+   || flat.match(/([\d,]+)\s*(?:\u2605|stars?)\s+ready/)
+   || flat.match(/\b([\d,]+)\s*points?\b(?!\s*(?:to go|away|each))/) // "0 POINTS"
+   || flat.match(/pancoins?\s*[:\s]\s*([\d,]+)/)
+   || flat.match(/([\d,]+)\s*pancoins?/);
+  if (bal) out.balance = Number(bal[1].replace(/,/g, ""));
+
+  /* ---- cheapest reward threshold ---- */
+  var costs = [];
+  // \b can't follow ★ (neither side is a word character), so the star and word
+  // forms need separate boundary handling.
+  var re = /([\d,]+)\s*(?:points?\b|stars?\b|[\u2605\u2606*])/gi, m;
+  while ((m = re.exec(flat)) !== null){
+    var n = Number(m[1].replace(/,/g, ""));
+    // "0 points" is a balance, not a price; ignore it and absurd values
+    if (n > 0 && n <= 100000) costs.push(n);
+  }
+  // Drop the balance value if it leaked into the list
+  if (out.balance !== null) costs = costs.filter(function(c){ return c !== out.balance; });
+  if (costs.length) out.threshold = Math.min.apply(null, costs);
+
+  /* ---- offers ---- */
+  var seen = {};
+  lines.forEach(function(line, i){
+    if (!/expires?\b/i.test(line)) return;
+    var ends = parseExpiry(line);
+
+    // The title is the nearest preceding line that reads like an offer.
+    var title = "";
+    for (var j = i - 1; j >= 0 && j >= i - 4; j--){
+      var cand = lines[j];
+      if (/expires?\b/i.test(cand)) continue;
+      if (/^(featured|for you|new|welcome deal|available offers|your offers|offers|rewards)$/i.test(cand)) continue;
+      if (cand.length < 4) continue;
+      // Wrapped titles: glue the previous line on if this one looks like a tail
+      if (j > 0 && /^[a-z(]/.test(cand) && lines[j-1].length > 4 && !/expires?\b/i.test(lines[j-1])){
+        title = lines[j-1] + " " + cand;
+      } else {
+        title = cand;
+      }
+      break;
+    }
+    title = title.replace(/\s+/g, " ").trim();
+    if (!title) return;
+    if (title.length > 90) title = title.slice(0, 87).trim() + "…";
+    var key = title.toLowerCase() + "|" + ends;
+    if (seen[key]) return;
+    seen[key] = true;
+    out.deals.push({title: title, ends: ends});
+  });
+
+  return out;
+}
+
+var tesseractLoading = null;
+function loadTesseract(){
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (tesseractLoading) return tesseractLoading;
+  tesseractLoading = new Promise(function(resolve, reject){
+    var s = document.createElement("script");
+    s.src = TESSERACT_SRC;
+    s.onload = function(){
+      window.Tesseract ? resolve(window.Tesseract)
+                       : reject(new Error("The OCR library loaded but didn't start."));
+    };
+    s.onerror = function(){
+      tesseractLoading = null;
+      reject(new Error("Couldn't download the OCR library. It needs a connection the first time."));
+    };
+    document.head.appendChild(s);
+  });
+  return tesseractLoading;
+}
+
+function ocrImage(file, onProgress){
+  return loadTesseract().then(function(T){
+    return T.recognize(file, "eng", {
+      logger: function(m){
+        if (m && m.status === "recognizing text" && typeof m.progress === "number"){
+          onProgress(Math.round(m.progress * 100));
+        }
+      }
+    });
+  }).then(function(res){
+    return (res && res.data && res.data.text) || "";
+  });
+}
+
 /* ============================ app state ============================ */
 var state = null;
 var ui = {tab:"ledger", view:"urgent", editing:null, sheet:null, scan:{running:false,status:"",error:""},
-          importMode:"merge", dataMsg:"", dataErr:"", addChoice:""};
+          importMode:"merge", dataMsg:"", dataErr:"", addChoice:"",
+          scanResults:[], scanPicks:{}, ocr:{running:false,status:"",pct:0,error:""}};
 var toastTimer = null;
 
 function esc(s){
@@ -635,6 +848,7 @@ function render(){
     });
     h += '</ul>';
 
+    h += '<button class="btn btn-ghost" style="margin-top:1.25rem" data-act="scan">Scan screenshots</button>';
     h += addBlock();
     h += '<p class="note">Nearby locations come from OpenStreetMap — no key, no account, no bill. '
       + 'Coverage depends on what volunteers have mapped, so a miss means unmapped, not absent.</p>';
@@ -731,6 +945,7 @@ function renderSheet(){
   if (ui.editing) el.innerHTML = editSheet(rowById(ui.editing));
   else if (ui.sheet === "settings") el.innerHTML = settingsSheet();
   else if (ui.sheet === "data") el.innerHTML = dataSheet();
+  else if (ui.sheet === "scan") el.innerHTML = scanSheet();
   else { el.innerHTML = ""; }
 }
 function sheetShell(title, subtitle, body){
@@ -757,14 +972,38 @@ function editSheet(r){
     + '<input id="f-goal" type="number" inputmode="numeric" value="'+esc(r.goal == null ? "" : r.goal)+'" placeholder="0"></label></div>'
     + '<label class="field">Points expire on<input id="f-expires" type="date" value="'+esc(r.expires)+'"></label>'
     + '<label class="field">Birthday perk<input id="f-bday" type="text" value="'+esc(r.bday)+'" placeholder="Free shake, week of"></label>'
-    + '<label class="field">Offer you want to use<input id="f-deal" type="text" value="'+esc(r.deal)+'" placeholder="Free fries with any purchase"></label>'
-    + '<label class="field">Offer ends<input id="f-dealEnds" type="date" value="'+esc(r.dealEnds)+'"></label>'
+    + dealsBlock(r)
     + '<label class="field">Link this brand opens<input id="f-link" type="url" value="'+esc(r.link)+'" placeholder="https://"></label>'
     + '<button class="btn btn-solid" style="margin-top:1.5rem" data-act="save-row" data-id="'+esc(r.id)+'">Save</button>';
   if (ready) b += '<button class="btn btn-go" style="margin-top:.75rem" data-act="redeem" data-id="'+esc(r.id)+'">I redeemed it — subtract '+Number(r.goal)+' points</button>';
   if (r.custom) b += '<button class="btn btn-danger" style="margin-top:.75rem" data-act="delete-row" data-id="'+esc(r.id)+'">Remove '+esc(r.name)+'</button>';
   if (r.checked) b += '<p class="note" style="text-align:center;margin-top:1rem">Last updated '+esc(r.checked)+'</p>';
   return sheetShell(r.name, r.program || "Added by you", b);
+}
+
+function dealsBlock(r){
+  var deals = r.deals || [];
+  var h = '<h3 class="section" style="margin-top:1.5rem">Offers</h3>';
+  if (!deals.length){
+    h += '<p class="sub">None saved. Scan a screenshot of the offers tab, or add one below.</p>';
+  } else {
+    h += '<ul class="list">';
+    deals.forEach(function(d, i){
+      var n = daysUntil(d.ends);
+      var label = d.ends
+        ? (n === null ? esc(d.ends) : (n < 0 ? "expired" : (n === 0 ? "ends today" : "ends in " + n + "d")))
+        : "no end date";
+      var tone = (n !== null && n < 0) ? "var(--ink30)" : (n !== null && n <= 10 ? "var(--soon)" : "var(--ink60)");
+      h += '<li class="row"><span class="row-main"><span class="bday-perk" style="color:var(--ink)">'
+        + esc(d.title) + '</span><span class="row-meta" style="color:'+tone+'">' + label + '</span></span>'
+        + '<button class="close" data-act="drop-deal" data-id="'+esc(r.id)+'" data-v="'+i+'" '
+        + 'aria-label="Remove this offer">×</button></li>';
+    });
+    h += '</ul>';
+  }
+  h += '<label class="field">Add an offer<input id="f-newdeal" type="text" placeholder="Free fries with any purchase"></label>'
+     + '<label class="field">Ends<input id="f-newdealEnds" type="date"></label>';
+  return h;
 }
 
 function settingsSheet(){
@@ -800,6 +1039,146 @@ function settingsSheet(){
     + '<p class="note">Nearby locations come from OpenStreetMap through the public Overpass mirrors, and town '
     + 'lookup from Nominatim. Both are volunteer-run and free — scan when you move, not on a timer.</p>';
   return sheetShell("Settings", null, b);
+}
+
+function scanSheet(){
+  var b = "";
+  if (!ui.scanResults.length && !ui.ocr.running){
+    b += '<p class="sub" style="margin-top:1rem">Screenshot the offers or rewards tab in any of these apps, '
+      + 'then load the images here. Everything is read on your phone — no upload, no account.</p>'
+      + '<button class="btn btn-solid" style="margin-top:1rem" data-act="pick-shots">Choose screenshots</button>'
+      + '<input id="f-shots" type="file" accept="image/*" multiple hidden>'
+      + '<p class="sub" style="margin-top:1rem">You can also select screenshots in your gallery and '
+      + 'share them to this app — they land straight here.</p>'
+      + '<p class="note">First run downloads the OCR engine, about 5 MB, and caches it. '
+      + 'After that it works offline. Reading each image takes a few seconds.</p>';
+  }
+
+  if (ui.ocr.running){
+    b += '<p class="sub" style="margin-top:1rem">'+esc(ui.ocr.status)+'</p>'
+      + '<div class="bar" style="margin-top:.75rem"><div class="bar-fill" style="width:'+ui.ocr.pct+'%"></div></div>';
+  }
+
+  if (ui.ocr.error) b += '<p class="error">'+esc(ui.ocr.error)+'</p>';
+
+  ui.scanResults.forEach(function(res, ri){
+    b += '<hr class="divider"><p class="sub" style="margin:0">'+esc(res.file)+'</p>'
+      + '<label class="field">Brand<select class="select" data-act="scan-brand" data-v="'+ri+'">'
+      + '<option value="">— skip this image —</option>';
+    state.rows.forEach(function(r){
+      b += '<option value="'+esc(r.id)+'"'+(res.brandId===r.id?" selected":"")+'>'+esc(r.name)+'</option>';
+    });
+    b += '</select></label>';
+
+    if (!res.brandId){
+      b += '<p class="note" style="margin-top:.5rem">Pick a brand above to use what was read from this image.</p>';
+      return;
+    }
+    var found = false;
+    if (res.balance !== null){
+      found = true;
+      b += scanCheck(ri, "balance", "Balance: " + res.balance + " points");
+    }
+    if (res.threshold !== null){
+      found = true;
+      b += scanCheck(ri, "threshold", "Cheapest reward: " + res.threshold + " points");
+    }
+    res.deals.forEach(function(d, di){
+      found = true;
+      var n = daysUntil(d.ends);
+      var when = d.ends ? (n !== null && n >= 0 ? "ends in " + n + "d" : esc(d.ends)) : "no date read";
+      b += scanCheck(ri, "deal:" + di, d.title + " — " + when);
+    });
+    if (!found){
+      b += '<p class="note" style="margin-top:.5rem">Nothing recognisable in this one. '
+        + 'A tighter crop on the numbers usually fixes it.</p>';
+    }
+  });
+
+  if (ui.scanResults.length && !ui.ocr.running){
+    b += '<button class="btn btn-solid" style="margin-top:1.5rem" data-act="scan-apply">Apply checked</button>'
+      + '<button class="btn btn-ghost" style="margin-top:.75rem" data-act="pick-shots">Scan more</button>'
+      + '<input id="f-shots" type="file" accept="image/*" multiple hidden>'
+      + '<p class="note">Check anything before applying. OCR misreads dates and digits often enough that '
+      + 'a glance here is cheaper than driving somewhere for a coupon that expired.</p>';
+  }
+  return sheetShell("Scan screenshots", "Read offers straight off the picture", b);
+}
+
+function scanCheck(ri, key, label){
+  var on = ui.scanPicks[ri + "|" + key] !== false;
+  return '<div class="bday-row"><button class="check'+(on?" on":"")+'" data-act="scan-pick" '
+    + 'data-id="'+ri+'" data-v="'+esc(key)+'" aria-pressed="'+(on?"true":"false")+'">'+(on?"✓":"")+'</button>'
+    + '<span class="row-main"><span class="bday-perk" style="color:var(--ink)">'+esc(label)+'</span></span></div>';
+}
+
+function runScan(files){
+  ui.ocr = {running:true, status:"Warming up the reader…", pct:0, error:""};
+  renderSheet();
+  var list = Array.prototype.slice.call(files);
+  var done = 0;
+
+  function next(){
+    if (!list.length){
+      ui.ocr = {running:false, status:"", pct:0, error:""};
+      renderSheet();
+      flash(ui.scanResults.length ? "Read " + done + " image" + (done===1?"":"s") : "Nothing read");
+      return;
+    }
+    var file = list.shift();
+    ui.ocr.status = "Reading " + file.name + "…";
+    ui.ocr.pct = 0;
+    renderSheet();
+    ocrImage(file, function(pct){
+      ui.ocr.pct = pct; renderSheet();
+    }).then(function(text){
+      var parsed = parseScreenshot(text);
+      parsed.file = file.name;
+      ui.scanResults.push(parsed);
+      done++;
+      next();
+    }).catch(function(e){
+      ui.ocr = {running:false, status:"", pct:0, error:e.message};
+      renderSheet();
+    });
+  }
+  next();
+}
+
+function applyScan(){
+  var byRow = {};
+  ui.scanResults.forEach(function(res, ri){
+    if (!res.brandId) return;
+    var target = (byRow[res.brandId] = byRow[res.brandId] || {deals:[]});
+    if (res.balance !== null && ui.scanPicks[ri+"|balance"] !== false) target.points = res.balance;
+    if (res.threshold !== null && ui.scanPicks[ri+"|threshold"] !== false) target.goal = res.threshold;
+    res.deals.forEach(function(d, di){
+      if (ui.scanPicks[ri+"|deal:"+di] !== false) target.deals.push(d);
+    });
+  });
+
+  var touched = 0;
+  var rows = state.rows.map(function(r){
+    var patch = byRow[r.id];
+    if (!patch) return r;
+    touched++;
+    var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
+    if (patch.points !== undefined) c.points = patch.points;
+    if (patch.goal !== undefined) c.goal = patch.goal;
+    if (patch.deals.length){
+      var have = {};
+      (c.deals || []).forEach(function(d){ have[d.title.toLowerCase()+"|"+d.ends] = true; });
+      c.deals = (c.deals || []).concat(patch.deals.filter(function(d){
+        return !have[d.title.toLowerCase()+"|"+d.ends];
+      }));
+    }
+    c.checked = todayISO();
+    return c;
+  });
+
+  ui.scanResults = []; ui.scanPicks = {}; ui.sheet = null;
+  patchRows(rows);
+  flash(touched ? "Updated " + touched + " brand" + (touched===1?"":"s") : "Nothing applied");
 }
 
 function dataSheet(){
@@ -855,9 +1234,21 @@ document.addEventListener("click", function(ev){
   if (act === "tab"){ ui.tab = v; render(); }
   else if (act === "view"){ ui.view = v; render(); }
   else if (act === "edit"){ ui.editing = id; ui.sheet = null; renderSheet(); }
-  else if (act === "close"){ ui.editing = null; ui.sheet = null; ui.dataMsg = ""; ui.dataErr = ""; renderSheet(); }
+  else if (act === "close"){
+    ui.editing = null; ui.sheet = null; ui.dataMsg = ""; ui.dataErr = "";
+    ui.scanResults = []; ui.scanPicks = {}; ui.ocr = {running:false,status:"",pct:0,error:""};
+    renderSheet();
+  }
   else if (act === "settings"){ ui.sheet = "settings"; ui.editing = null; renderSheet(); }
   else if (act === "data"){ ui.sheet = "data"; renderSheet(); }
+  else if (act === "scan"){ ui.sheet = "scan"; ui.editing = null; ui.ocr.error = ""; renderSheet(); }
+  else if (act === "pick-shots"){ var sf = document.getElementById("f-shots"); if (sf) sf.click(); }
+  else if (act === "scan-pick"){
+    var k = id + "|" + v;
+    ui.scanPicks[k] = ui.scanPicks[k] === false;
+    renderSheet();
+  }
+  else if (act === "scan-apply"){ applyScan(); }
   else if (act === "toggle"){
     patchRows(state.rows.map(function(r){
       if (r.id !== id) return r;
@@ -872,16 +1263,27 @@ document.addEventListener("click", function(ev){
       if (r.id !== id) return r;
       var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
       c.points = pts; c.goal = goal;
-      c.expires = val("f-expires"); c.bday = val("f-bday");
-      c.deal = val("f-deal"); c.dealEnds = val("f-dealEnds"); c.link = val("f-link");
+      c.expires = val("f-expires"); c.bday = val("f-bday"); c.link = val("f-link");
       c.checked = todayISO();
+      var nd = val("f-newdeal").trim();
+      c.deals = (c.deals || []).slice();
+      if (nd) c.deals.push({title: nd, ends: val("f-newdealEnds")});
       if (act === "redeem"){
         c.points = Math.max(0, (Number(pts)||0) - (Number(goal)||0));
-        c.deal = ""; c.dealEnds = "";
       }
       return c;
     }));
     ui.editing = null; renderSheet();
+  }
+  else if (act === "drop-deal"){
+    var idx = Number(v);
+    patchRows(state.rows.map(function(r){
+      if (r.id !== id) return r;
+      var c = {}; Object.keys(r).forEach(function(k){ c[k] = r[k]; });
+      c.deals = (c.deals || []).filter(function(_, i){ return i !== idx; });
+      return c;
+    }));
+    renderSheet();
   }
   else if (act === "delete-row"){
     patchRows(state.rows.filter(function(r){ return r.id !== id; }));
@@ -948,6 +1350,13 @@ document.addEventListener("change", function(ev){
   var t = ev.target;
   if (t.getAttribute && t.getAttribute("data-act") === "add-choice"){
     ui.addChoice = t.value; render();
+  } else if (t.id === "f-shots"){
+    if (t.files && t.files.length) runScan(t.files);
+    t.value = "";
+  } else if (t.getAttribute && t.getAttribute("data-act") === "scan-brand"){
+    var ri = Number(t.getAttribute("data-v"));
+    if (ui.scanResults[ri]) ui.scanResults[ri].brandId = t.value || null;
+    renderSheet();
   } else if (t.id === "f-file"){
     var file = t.files && t.files[0];
     if (!file) return;
@@ -959,9 +1368,57 @@ document.addEventListener("change", function(ev){
   }
 });
 
+/* Screenshots sent in via the Android share sheet land in a cache the service
+   worker fills. Collect them once, then clear, so a refresh doesn't re-run. */
+var SHARE_CACHE = "rewards-ledger-shared";
+
+function collectSharedImages(){
+  if (!window.caches) return Promise.resolve([]);
+  return caches.open(SHARE_CACHE).then(function(cache){
+    return cache.keys().then(function(keys){
+      if (!keys.length) return [];
+      return Promise.all(keys.map(function(k){
+        return cache.match(k).then(function(res){
+          if (!res) return null;
+          return res.blob().then(function(blob){
+            var tail = k.url.split("/").pop() || "shared.png";
+            var name = decodeURIComponent(tail.replace(/^\d+-/, ""));
+            var f;
+            try { f = new File([blob], name, {type: blob.type || "image/png"}); }
+            catch (e) { f = blob; f.name = name; }
+            return f;
+          });
+        });
+      })).then(function(files){
+        return Promise.all(keys.map(function(k){ return cache.delete(k); }))
+          .then(function(){ return files.filter(Boolean); });
+      });
+    });
+  }).catch(function(){ return []; });
+}
+
+function checkForShare(){
+  if (location.search.indexOf("shared=1") === -1) return;
+  // Strip the flag so a reload doesn't look like a fresh share.
+  try { history.replaceState({}, "", location.pathname); } catch (e) {}
+  ui.sheet = "scan"; ui.editing = null;
+  ui.ocr = {running:true, status:"Collecting shared screenshots…", pct:0, error:""};
+  renderSheet();
+  collectSharedImages().then(function(files){
+    if (!files.length){
+      ui.ocr = {running:false, status:"", pct:0,
+        error:"Those images didn't come through. Try sharing them again."};
+      renderSheet();
+      return;
+    }
+    runScan(files);
+  });
+}
+
 /* ============================ boot ============================ */
 state = loadState();
 render();
+checkForShare();
 
 if ("serviceWorker" in navigator && window.isSecureContext){
   window.addEventListener("load", function(){

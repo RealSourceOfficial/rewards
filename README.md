@@ -5,6 +5,9 @@ Installs to your Android home screen as a real app.
 
 **No build step. No npm, no Node, no bundler.** Five files. Nothing to compile, ever.
 
+Screenshots of your rewards apps can be read automatically — OCR runs in the browser, on the
+device.
+
 Everything you type stays in your phone's browser storage. Nothing is sent anywhere except the
 two map lookups you trigger by hand.
 
@@ -85,6 +88,23 @@ After the first launch it opens offline. Only the nearby scan needs a connection
 
 ## Using it
 
+**Share screenshots in.** Once installed, the app shows up in Android's share sheet. Select any
+number of screenshots in your gallery, Share, pick Rewards ledger, and they go straight into the
+review screen. This is the fastest path and needs nothing else installed.
+
+**Scan screenshots.** Button at the bottom of the points list. Screenshot the offers or rewards
+tab in any of these apps, load the images, and it reads the text on your phone — balance, cheapest
+reward threshold, and every dated offer. It guesses the brand from the text and you can correct it
+with a dropdown. Nothing applies until you review it, because OCR misreads dates and digits often
+enough that a glance is cheaper than driving somewhere for a dead coupon.
+
+First use downloads the OCR engine (tesseract.js, about 5 MB) from a CDN and caches it, so it works
+offline after that. No key, no account, and no image ever leaves the device.
+
+What it reads well: "0 POINTS", "You have 0★", "Expires in 6 days", "Expires 09/28/2026", and
+wrapped offer titles. What it won't guess: bare numbers with no unit next to them, like IHOP's Stack
+Market prices. It leaves those blank rather than inventing a value.
+
 **Points tab.** Tap a brand to open its app, read your balance, tap the row and type it in. The
 card at the top tells you where to eat next and why. Expiring points outrank a ready reward, since
 a reward sitting still costs nothing while expiring points are money walking out the door.
@@ -150,3 +170,71 @@ overwrite each one with what your app actually says.
 
 Nearby lookups use the Overpass API and Nominatim, both volunteer-run and donation-funded. One
 rescan is a single request covering every brand, cached until you scan again. Don't hammer them.
+
+Screenshot reading uses tesseract.js, pinned to v5 and pulled from jsDelivr. It's the only
+third-party code the app loads, it loads lazily, and everything works without it. If the pinned
+version ever breaks, change `TESSERACT_SRC` near the top of the script.
+
+Offers are stored per brand as a list, so one screenshot of an offers tab can add half a dozen at
+once. Expired ones stop counting automatically but stay visible in the edit sheet until you remove
+them.
+
+
+---
+
+## Capturing the screenshots automatically
+
+`capture.sh` drives your phone from your computer over adb and walks through the apps for you.
+Nothing is installed on the phone, nothing is rooted.
+
+Pair once (Android 11+, no cable needed):
+
+```
+Settings > Developer options > Wireless debugging > Pair device with code
+adb pair <phone-ip>:<pair-port>
+adb connect <phone-ip>:<port>
+```
+
+Then:
+
+```bash
+./capture.sh discover     # which rewards apps are installed, and their package names
+./capture.sh init         # writes a starter apps.conf from what it found
+./capture.sh run          # launch each app, tap through to the tabs, screenshot
+./capture.sh push         # copy the PNGs back into the phone's gallery
+```
+
+Finish on the phone: Gallery, select the new shots, Share, Rewards ledger.
+
+`apps.conf` is tab-separated — slug, package, then the tab labels to visit:
+
+```
+wendys      com.wendys.nutritiontool      Rewards,Offers
+jackbox     com.jackinthebox.ordering     Rewards,Offers
+starbucks   com.starbucks.mobilecard      Rewards
+```
+
+Labels are matched against on-screen text via `uiautomator dump`, so they follow the app's own
+wording rather than fixed coordinates — which means a layout change usually costs you one label
+edit instead of a rewrite. Use `-` to just screenshot whatever opens.
+
+### What this won't do
+
+It can't log in for you, dismiss a promo interstitial it has never seen, or know that an app buried
+its points behind two more taps. Expect to run `./capture.sh run <slug>` on one app at a time while
+watching the phone, and to fix labels as you go. Once an app's line is right it stays right until
+that app redesigns.
+
+Worth knowing: some app terms of service prohibit accessing them by automated means. This is your
+device, your accounts, and your own data on your own screen, which is a long way from scraping
+someone's servers — but it is your call to make, and it is why nothing here touches a network API.
+
+### Alternatives if you'd rather stay on the phone
+
+MacroDroid, Tasker with AutoInput, or Automate can do the same walk using Android's accessibility
+service. Screenshots without root work through `AccessibilityService#takeScreenshot` — the usual
+route is the open-source Screenshot Tile (No Root), which exposes a broadcast intent those apps can
+fire. On Android 13+ some manufacturers grey out the accessibility toggle until you allow
+"restricted settings" for the app.
+
+These are fiddlier to set up than the adb script but survive not having a computer nearby.
