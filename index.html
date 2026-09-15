@@ -598,6 +598,9 @@ function detectBrand(text){
 /* Lines that look like a date but are really buttons, badges or fine print. */
 var JUNK_LINE = /^(featured|for you|new|welcome|welcome deal|limited time|available offers|your offers|offers|rewards|my rewards|deals|terms|see terms|see details|see full terms and conditions|view details|view offers|read more|redeem|order now|add deal|apply code|offer details|have a promo code\??|valid \d+x\/(day|week)|deal applied!?|carryout only|minimum spend \$\d+|\$[\d.]+ each!?|online use only|expires soon|national cheeseburger day|deal)$/i;
 
+/* Legal boilerplate mentions expiry without ever describing an offer. */
+var FINE_PRINT = /(no cash value|terms\s*&?\s*conditions|subject to|referral|limited time offer\.|per year|members only|excludes tax\)?\s*$|see full terms)/i;
+
 /* What counts as an expiry line. */
 var EXPIRY_LINE = /(?:expires?|valid thru|valid through|offer ends?|ends on)\b/i;
 
@@ -609,6 +612,16 @@ function parseScreenshot(raw){
   var lines = text.split("\n").map(function(l){ return l.trim(); }).filter(Boolean);
   var flat = text.toLowerCase().replace(/[’']/g, "'");
   var out = {brandId: detectBrand(text), balance: null, threshold: null, deals: []};
+
+  /* OCR reliably turns a lone zero into the letter O, and a balance of zero is
+     the single most common value on these screens. Put it back before anything
+     tries to read a number. */
+  flat = flat.replace(/(^|[^a-z0-9])[`'"\u2018\u2019]?[oO][`'"\u2018\u2019]?(?=\s*(?:points?|pts|stars?)\b)/g, "$10");
+
+  /* Catalogue section headers ("QUICK BITES 250-500 POINTS", "1-499 POINTS",
+     "150-350 POINTS") are ranges, not values. Left in, the tail of the range
+     gets read as a balance. Individual item prices below them still count. */
+  flat = flat.replace(/\b\d[\d,]*\s*[-\u2013\u2014]\s*\d[\d,]*\s*(?:points?|pts|stars?)\b/gi, " ");
 
   /* Earn-rate copy ("$1 = 10 Points", "10 PTS/$1", "Earn 10 points per $1
      spent", "$1 spent = 10 Stars") reads exactly like a cheap reward. Drop
@@ -637,8 +650,29 @@ function parseScreenshot(raw){
     new RegExp(num + "\\s*pts\\b(?!\\s*\\/)", "i"),      // McDonald's "11888 pts", 7-Eleven "800 pts"
     new RegExp("\\b" + num + "\\s*points?\\b(?!\\s*(?:to go|away|each|rewards|to unlock|for\\s*\\$))", "i"),
   ];
+  /* The last two rules are generic enough to match an item price in a rewards
+     catalogue ("Original Glazed Doughnut / 150 points"), which would report a
+     doughnut's price as your balance. A real balance is either in the first
+     line or two, or sits on a line that says so. Anything else, we decline to
+     guess — a blank balance is easy to fill in, a wrong one is easy to miss. */
+  var lines0 = flat.split("\n");
+  var HEADERISH = /(rewards|available|balance|you\s+have|you'?ve\s+got|redeem)/i;
+
   for (var bi = 0; bi < BAL.length; bi++){
-    var bm = flat.match(BAL[bi]);
+    var generic = bi >= BAL.length - 2;
+    var bm = null;
+    if (!generic){
+      bm = flat.match(BAL[bi]);
+    } else {
+      for (var li = 0; li < lines0.length && li < 12; li++){
+        var hit = lines0[li].match(BAL[bi]);
+        if (!hit) continue;
+        if (li < 2 || HEADERISH.test(lines0[li]) || (li > 0 && HEADERISH.test(lines0[li - 1]))){
+          bm = hit;
+        }
+        break;
+      }
+    }
     if (bm){ out.balance = bm[1] === undefined ? 0 : Number(String(bm[1]).replace(/,/g, "")); break; }
   }
 
@@ -683,7 +717,12 @@ function parseScreenshot(raw){
     if (!EXPIRY_LINE.test(line)) return;
     // "EXPIRES SOON" and friends are badges, not dates.
     if (!/\d/.test(line) && !/(today|tomorrow)/i.test(line)) return;
+    // Terms and conditions talk about expiry constantly and mean none of it.
+    if (FINE_PRINT.test(line)) return;
     var ends = parseExpiry(line);
+    // No readable date means we'd be inventing an offer out of whatever line
+    // happened to sit above some legal boilerplate. Skip it.
+    if (!ends) return;
 
     // The title is the nearest preceding line that reads like an offer.
     var title = "";
